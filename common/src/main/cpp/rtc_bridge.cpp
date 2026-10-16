@@ -90,7 +90,9 @@ Java_com_shilapi_xcertplay_web_RtcNative_create(JNIEnv* env, jobject owner, jstr
         packetizer.maxFragmentSize = 1100;
         check(wheelplaySetVideoPacketizer(p->track, &packetizer, hevc));
         check(rtcChainRtcpSrReporter(p->track));
-        check(rtcChainRtcpNackResponder(p->track, 512));
+        // An HEVC keyframe can exceed 512 packets; a smaller table forgets the lost head of a
+        // reference frame before the browser can NACK it, stalling the decoder into fallback.
+        check(rtcChainRtcpNackResponder(p->track, 2048));
         check(rtcChainPliHandler(p->track, [](int, void* ptr) { static_cast<Peer*>(ptr)->emit("keyframe"); }));
         return reinterpret_cast<jlong>(p.release());
     } catch (const std::exception& e) { p->dispose(env); fail(env, e); return 0; }
