@@ -159,6 +159,7 @@ internal object BrowserStrings {
 
     fun render(context: Context, template: String): String {
         val locale = context.resources.configuration.locales[0].toLanguageTag()
+        // Android uses ICU, which rejects unescaped closing braces even though the JVM accepts them.
         return Regex("\\{\\{([a-z0-9_]+)\\}\\}").replace(template) { match ->
             val key = match.groupValues[1]
             TextUtils.htmlEncode(
