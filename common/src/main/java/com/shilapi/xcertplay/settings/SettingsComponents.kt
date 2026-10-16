@@ -25,6 +25,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shilapi.xcertplay.host.R
+import kotlin.math.roundToInt
 
 @Composable
 internal fun settingsString(@StringRes id: Int, vararg args: Any) =
@@ -151,6 +152,50 @@ internal fun SettingsChoice(
             open = false
             onSelected(it)
         }
+}
+
+/**
+ * A stepped slider over an inclusive integer range. The thumb tracks locally while dragging and
+ * only commits on release so a continuous gesture does not reconnect the iPhone on every tick.
+ */
+@Composable
+internal fun SettingsSlider(
+    @StringRes title: Int,
+    initial: Int,
+    range: IntRange,
+    step: Int,
+    tag: String,
+    valueLabel: (Int) -> String,
+    onCommit: (Int) -> Unit,
+) {
+    val stops = ((range.last - range.first) / step).coerceAtLeast(1)
+    var index by rememberSaveable(title) {
+        mutableIntStateOf(((initial - range.first) / step).coerceIn(0, stops))
+    }
+    Column(
+        Modifier.fillMaxWidth().testTag(tag).padding(vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                settingsString(title),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                valueLabel(range.first + index * step),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Slider(
+            value = index.toFloat(),
+            onValueChange = { index = it.roundToInt().coerceIn(0, stops) },
+            valueRange = 0f..stops.toFloat(),
+            steps = (stops - 1).coerceAtLeast(0),
+            onValueChangeFinished = { onCommit(range.first + index * step) },
+        )
+    }
 }
 
 @Composable

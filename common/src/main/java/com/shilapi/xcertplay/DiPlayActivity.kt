@@ -370,6 +370,7 @@ class DiPlayActivity : AppCompatActivity() {
             text = { setting, value -> changeSettings { applySettingsEffect(settingsModel.edit(setting, value)) } },
             credentials = { ssid, password -> changeSettings { settingsModel.saveCredentials(ssid, password) } },
             margins = { margins -> changeSettings { applySettingsEffect(settingsModel.saveMargins(margins)) }?.let(::toast) },
+            physicalWidth = { mm -> changeSettings { applySettingsEffect(settingsModel.setPhysicalWidth(mm)) }?.let(::toast) },
             resetBranding = { includeName -> changeSettings { settingsModel.resetBranding(includeName) }?.let(::toast) },
             command = { command -> changeSettings { settingsCommand(command) }?.let(::toast) },
             renameBrowser = { id, name -> changeSettings { settingsModel.renameBrowser(id, name) }?.let(::toast) },
@@ -862,7 +863,7 @@ class DiPlayActivity : AppCompatActivity() {
                     appendLine("Connection: ${if (AirPlayPersistence.loadWirelessEnabled(appContext)) "wireless" else "USB"}")
                     appendLine("Authentication: local experimental beta identity; no remote fallback")
                     appendLine("Saved video preference (may differ from active session): ${if (AirPlayPersistence.loadHevcEnabled(appContext)) "HEVC" else "H.264"}; ${AirPlayPersistence.loadFps(appContext)} fps")
-                    appendLine("CarPlay size: ${com.shilapi.xcertplay.airplay.CarPlaySize.fromWidthMillimeters(AirPlayPersistence.loadWidthPhysicalMm(appContext)).name}")
+                    appendLine("CarPlay size: ${AirPlayPersistence.loadWidthPhysicalMm(appContext)} mm reported screen width")
                     appendLine("Saved resolution preference (may differ from active session): ${AirPlayPersistence.loadDisplayScaleTenths(appContext) * 10}%")
                     appendLine("Tesla compatibility: enabled=${TeslaHttpCompatibility.config(appContext).enabled}; mode=${TeslaHttpCompatibility.config(appContext).mode}; addressConfigured=${TeslaHttpCompatibility.status.address != null}; downstreams=${TeslaHttpCompatibility.status.downstreams.joinToString()}")
                     TeslaHttpCompatibility.status.error?.let { appendLine("Tesla compatibility status: $it") }

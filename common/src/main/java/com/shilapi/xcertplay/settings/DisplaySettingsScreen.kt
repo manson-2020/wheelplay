@@ -17,7 +17,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.shilapi.xcertplay.*
-import com.shilapi.xcertplay.airplay.CarPlaySize
+import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.web.RtcRecoveryPolicy
 import com.shilapi.xcertplay.web.StreamTechnology
@@ -33,12 +33,15 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
         CarPlayAppearance.entries.map { settingsString(it.labelRes) },
     )
     SettingsDescription(R.string.settings_appearance_description)
-    SettingsChoice(
-        state,
-        actions,
-        ChoiceSetting.DISPLAY_SIZE,
-        R.string.settings_display_size,
-        CarPlaySize.entries.map { settingsString(it.labelRes) },
+    SettingsSlider(
+        title = R.string.settings_display_size,
+        initial = state.displayWidthMm,
+        range =
+            AirPlayDisplaySettings.MIN_WIDTH_PHYSICAL_MM..AirPlayDisplaySettings.MAX_WIDTH_PHYSICAL_MM,
+        step = AirPlayDisplaySettings.WIDTH_PHYSICAL_MM_STEP,
+        tag = "slider:display-size",
+        valueLabel = { "$it mm" },
+        onCommit = actions.physicalWidth,
     )
     SettingsDescription(R.string.settings_display_size_description)
     val margins = state.margins

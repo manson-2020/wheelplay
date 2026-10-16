@@ -3,6 +3,7 @@ package com.shilapi.xcertplay.settings
 
 import androidx.annotation.StringRes
 import com.shilapi.xcertplay.CarPlaySafeMargins
+import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.network.TeslaHttpConfig
 import com.shilapi.xcertplay.web.RememberedBrowsers
@@ -25,7 +26,6 @@ internal enum class SettingsCategory(
 
 internal enum class ChoiceSetting {
     APPEARANCE,
-    DISPLAY_SIZE,
     RESOLUTION,
     FPS,
     STREAM,
@@ -95,6 +95,7 @@ internal data class SettingsState(
     val iconVersion: Long = 0,
     val margins: CarPlaySafeMargins? = null,
     val legacySafeArea: Boolean = false,
+    val displayWidthMm: Int = AirPlayDisplaySettings.DEFAULT_WIDTH_PHYSICAL_MM,
     val ssid: String = "",
     val password: String = "",
     val httpPort: Int = 8080,
@@ -137,6 +138,7 @@ internal class SettingsActions(
     val text: (TextSetting, String) -> String?,
     val credentials: (String, String) -> String?,
     val margins: (CarPlaySafeMargins) -> Unit,
+    val physicalWidth: (Int) -> Unit,
     val resetBranding: (Boolean) -> Unit,
     val command: (SettingsCommand) -> Unit,
     val renameBrowser: (String, String) -> Unit,

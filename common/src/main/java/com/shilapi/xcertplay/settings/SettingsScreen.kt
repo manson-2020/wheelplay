@@ -225,13 +225,14 @@ private fun AudioSettingsPreview() {
 
 private val previewActions =
     SettingsActions(
-        { _, _ -> },
-        { _, _ -> },
-        { _, _ -> null },
-        { _, _ -> null },
-        {},
-        {},
-        {},
-        { _, _ -> },
-        {},
+        choice = { _, _ -> },
+        toggle = { _, _ -> },
+        text = { _, _ -> null },
+        credentials = { _, _ -> null },
+        margins = {},
+        physicalWidth = {},
+        resetBranding = {},
+        command = {},
+        renameBrowser = { _, _ -> },
+        removeBrowser = {},
     )

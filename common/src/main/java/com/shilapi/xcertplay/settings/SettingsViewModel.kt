@@ -5,7 +5,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import com.shilapi.xcertplay.*
-import com.shilapi.xcertplay.airplay.CarPlaySize
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.hud.BydOutputSettings
 import com.shilapi.xcertplay.media.MediaAudioBuffer
@@ -71,11 +70,6 @@ internal class SettingsViewModel(
             choices =
                 mapOf(
                     ChoiceSetting.APPEARANCE to AirPlayPersistence.loadAppearance(app).ordinal,
-                    ChoiceSetting.DISPLAY_SIZE to
-                        CarPlaySize.fromWidthMillimeters(
-                                AirPlayPersistence.loadWidthPhysicalMm(app)
-                            )
-                            .ordinal,
                     ChoiceSetting.RESOLUTION to
                         listOf(10, 8, 6)
                             .indexOf(AirPlayPersistence.loadDisplayScaleTenths(app))
@@ -124,8 +118,9 @@ internal class SettingsViewModel(
             iconPath = AirPlayPersistence.loadCustomAirPlayIconFile(app)?.absolutePath,
             iconVersion = AirPlayPersistence.loadCustomAirPlayIconFile(app)?.lastModified() ?: 0,
             margins = AirPlayPersistence.loadSafeMargins(app),
+            displayWidthMm = AirPlayPersistence.loadWidthPhysicalMm(app),
             legacySafeArea =
-                (WebSession.currentBrowserViewport ?: (1280 to 720)).let { (w, h) ->
+                (WebSession.currentBrowserViewport ?: (1920 to 1200)).let { (w, h) ->
                     AirPlayPersistence.loadSafeAreaRect(app, w, h) != null
                 },
             ssid = AirPlayPersistence.loadManualHotspotSsid(app),
@@ -148,13 +143,6 @@ internal class SettingsViewModel(
                 ChoiceSetting.APPEARANCE -> {
                     WebSession.setAppearance(app, CarPlayAppearance.entries[index])
                     SettingsEffect.None
-                }
-                ChoiceSetting.DISPLAY_SIZE -> {
-                    AirPlayPersistence.saveWidthPhysicalMm(
-                        app,
-                        CarPlaySize.entries[index].widthMillimeters,
-                    )
-                    SettingsEffect.Reconnect()
                 }
                 ChoiceSetting.RESOLUTION -> {
                     AirPlayPersistence.saveDisplayScaleTenths(app, listOf(10, 8, 6)[index])
@@ -360,6 +348,14 @@ internal class SettingsViewModel(
 
     fun saveMargins(margins: CarPlaySafeMargins): SettingsEffect {
         AirPlayPersistence.saveSafeMargins(app, margins)
+        reload()
+        return SettingsEffect.Reconnect()
+    }
+
+    /** Physical screen width reported to the iPhone; a wider value shrinks CarPlay controls. */
+    fun setPhysicalWidth(millimeters: Int): SettingsEffect {
+        if (state.value.displayWidthMm == millimeters) return SettingsEffect.None
+        AirPlayPersistence.saveWidthPhysicalMm(app, millimeters)
         reload()
         return SettingsEffect.Reconnect()
     }

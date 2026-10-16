@@ -433,7 +433,7 @@ class CarPlayHostActivity : ComponentActivity() {
         loadPersistedSettings()
         locationPermissionAvailable = hasFineLocationPermission()
         setContentView(buildContentView().also(ServerWindow::fitContent))
-        activeDisplaySize = DisplaySize(1280, 720)
+        activeDisplaySize = DEFAULT_BROWSER_DISPLAY
         WebSession.setBrowserViewportListener { width, height ->
             mainHandler.post { scheduleBrowserDisplaySize(width, height) }
         }
@@ -3040,7 +3040,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun scheduleDisplaySize(width: Int, height: Int) {
         if (width <= 0 || height <= 0 || shuttingDown.get()) return
         val browserSize = WebSession.currentBrowserViewport.takeIf { WebSession.adaptiveBrowserSize }
-        val size = browserSize?.let { DisplaySize(it.first, it.second) } ?: DisplaySize(1280, 720)
+        val size = browserSize?.let { DisplaySize(it.first, it.second) } ?: DEFAULT_BROWSER_DISPLAY
         if (size == activeDisplaySize || size == pendingDisplaySize) return
         pendingDisplaySize = size
         mainHandler.removeCallbacks(applyDisplaySize)
@@ -3050,7 +3050,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun scheduleBrowserDisplaySize(width: Int?, height: Int?) {
         if (shuttingDown.get()) return
         val size = if (width == null || height == null) {
-            DisplaySize(1280, 720)
+            DEFAULT_BROWSER_DISPLAY
         } else {
             val scale = minOf(1.0, 3840.0 / width, 2160.0 / height)
             fun even(value: Double) = (value.toInt().coerceAtLeast(2) / 2) * 2
@@ -3487,6 +3487,9 @@ class CarPlayHostActivity : ComponentActivity() {
         const val THREE_FINGER_SWIPE_DISTANCE_DP = 72
         const val THREE_FINGER_SWIPE_DIRECTION_RATIO = 1.15f
         const val MAX_SETTINGS_MENU_WIDTH_PX = 1200
+        // Fallback before the browser reports a viewport: the native 1920x1200 of the
+        // Tesla 15.4" touchscreen, keeping iOS on a 1x scale for a dense dashboard.
+        val DEFAULT_BROWSER_DISPLAY = DisplaySize(1920, 1200)
         val MENU_BACKGROUND = Color.rgb(12, 16, 19)
         val MENU_SECONDARY = Color.rgb(170, 180, 190)
         val MENU_ACCENT = Color.rgb(127, 205, 154)

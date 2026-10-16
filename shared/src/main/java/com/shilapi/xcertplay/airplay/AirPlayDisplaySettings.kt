@@ -18,9 +18,11 @@ object AirPlayDisplaySettings {
     const val DEFAULT_FPS = MAX_FPS
 
     const val MIN_WIDTH_PHYSICAL_MM = 100
-    const val MAX_WIDTH_PHYSICAL_MM = 400
+    // Dense dashboards (e.g. the Tesla browser) want controls below the 400mm head-unit scale;
+    // the reported physical size is separately clamped by MAX_REPORTED_PHYSICAL_MM downstream.
+    const val MAX_WIDTH_PHYSICAL_MM = 600
     const val WIDTH_PHYSICAL_MM_STEP = 50
-    const val DEFAULT_WIDTH_PHYSICAL_MM = 200
+    const val DEFAULT_WIDTH_PHYSICAL_MM = 450
     val DEFAULT_PHYSICAL_SIZE_BASIS = AirPlayPhysicalSizeBasis.WIDTH
     const val MIN_REPORTED_PHYSICAL_MM = 1
     const val MAX_REPORTED_PHYSICAL_MM = 2_000

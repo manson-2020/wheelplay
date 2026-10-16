@@ -442,7 +442,7 @@ object AirPlayPersistence {
         AirPlayDisplaySettings.sanitizeWidthPhysicalMm(
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(
                 KEY_WIDTH_PHYSICAL_MM,
-                com.shilapi.xcertplay.airplay.CarPlaySize.DEFAULT.widthMillimeters,
+                AirPlayDisplaySettings.DEFAULT_WIDTH_PHYSICAL_MM,
             ),
         )
 
