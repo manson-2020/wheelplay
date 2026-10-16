@@ -159,7 +159,7 @@ internal object BrowserStrings {
 
     fun render(context: Context, template: String): String {
         val locale = context.resources.configuration.locales[0].toLanguageTag()
-        return Regex("\\{\\{([a-z0-9_]+)}}").replace(template) { match ->
+        return Regex("\\{\\{([a-z0-9_]+)\\}\\}").replace(template) { match ->
             val key = match.groupValues[1]
             TextUtils.htmlEncode(
                 if (key == "locale") locale else context.getString(resources.getValue(key))

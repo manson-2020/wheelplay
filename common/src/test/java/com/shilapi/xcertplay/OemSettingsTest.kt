@@ -67,11 +67,11 @@ class OemSettingsTest : ComposeSettingsTest() {
             .edit()
             .putString("oem_label", "BYD")
             .commit()
-        assertEquals("NIO", AirPlayPersistence.loadSimulatedManufacturerName(context))
+        assertEquals("Tesla", AirPlayPersistence.loadSimulatedManufacturerName(context))
         AirPlayPersistence.saveSimulatedManufacturerName(context, " BYD ")
         repeat(2) { assertEquals("BYD", AirPlayPersistence.loadSimulatedManufacturerName(context)) }
         AirPlayPersistence.saveSimulatedManufacturerName(context, "   ")
-        assertEquals("NIO", AirPlayPersistence.loadSimulatedManufacturerName(context))
+        assertEquals("Tesla", AirPlayPersistence.loadSimulatedManufacturerName(context))
     }
 
     @Test
@@ -168,7 +168,7 @@ class OemSettingsTest : ComposeSettingsTest() {
             controller.pause().resume()
             compose.onNodeWithText("恢复默认名称与图标").performScrollTo().performClick()
             clickText("确认")
-            assertEquals("NIO", AirPlayPersistence.loadSimulatedManufacturerName(context))
+            assertEquals("Tesla", AirPlayPersistence.loadSimulatedManufacturerName(context))
             assertNull(AirPlayPersistence.loadCustomAirPlayIconFile(context))
         } finally {
             controller.pause().stop().destroy()

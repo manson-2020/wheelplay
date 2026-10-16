@@ -82,7 +82,7 @@ object AirPlayPersistence {
     private const val CUSTOM_ICON_FILE = "airplay-icon.png"
 
     const val DEFAULT_MODEL = "WheelPlay"
-    const val DEFAULT_SIMULATED_MANUFACTURER_NAME = "NIO"
+    const val DEFAULT_SIMULATED_MANUFACTURER_NAME = "Tesla"
     const val DEFAULT_MFI_I2C_PATH = "/dev/i2c-1"
 
     fun loadBrowserAudioPlayback(context: Context): Boolean =

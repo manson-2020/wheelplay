@@ -386,7 +386,7 @@
     <string name="host_mobile_compatible">Mobile compatible</string>
     <string name="host_this_head_unit_cannot_use_the_smaller_size_at">This head unit cannot use the smaller size at this resolution. Using Default.</string>
     <string name="host_custom_1_1_icon">Custom 1:1 icon</string>
-    <string name="host_default_nio_icon">Default NIO icon</string>
+    <string name="host_default_nio_icon">Default Tesla icon</string>
     <string name="host_safe_area_waiting_for_activity_size">Safe area: waiting for activity size</string>
     <string name="host_carplay_session_ended_reconnecting">CarPlay session ended; reconnecting</string>
     <string name="host_transport_error_reconnecting">Transport error; reconnecting</string>

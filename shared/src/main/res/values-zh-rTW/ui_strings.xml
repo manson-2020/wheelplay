@@ -386,7 +386,7 @@
     <string name="host_mobile_compatible">移動裝置相容</string>
     <string name="host_this_head_unit_cannot_use_the_smaller_size_at">此車機無法在目前解析度使用更小尺寸，已恢復預設。</string>
     <string name="host_custom_1_1_icon">自定義正方形圖示</string>
-    <string name="host_default_nio_icon">預設 NIO 圖示</string>
+    <string name="host_default_nio_icon">預設 Tesla 圖示</string>
     <string name="host_safe_area_waiting_for_activity_size">安全區域：等待介面尺寸</string>
     <string name="host_carplay_session_ended_reconnecting">CarPlay 會話已結束，正在重新連線</string>
     <string name="host_transport_error_reconnecting">傳輸錯誤，正在重新連線</string>
