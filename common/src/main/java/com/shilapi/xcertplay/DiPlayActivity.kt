@@ -209,7 +209,6 @@ class DiPlayActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (TeslaHttpCompatibility.config(this).let { it.enabled && it.mode == TeslaHttpMode.ROOT }) RootAccess.checkOnStartup()
-        com.shilapi.xcertplay.hud.BydNavigationOutputs.onAppOpened(applicationContext)
         ServerWindow.showSystemBars(window)
         refreshAuthentication()
         selectedPrivateKey = savedInstanceState?.getString("selectedPrivateKey")?.let(Uri::parse)
@@ -632,18 +631,11 @@ class DiPlayActivity : AppCompatActivity() {
             .setNegativeButton(getString(UiR.string.ui_cancel), null).show()
     }
 
-    // BYD maps the AOSP tether action to its own hotspot screen; other firmware falls back to Wi-Fi settings.
-    // BYD shows that screen as a dialog and closes it unless its own settings or the car home screen is on top,
-    // so the home screen goes first.
     private fun openCarWifiSettings() {
         val hotspot = Intent("com.android.settings.WIFI_TETHER_SETTINGS")
-        val target = packageManager.resolveActivity(hotspot, 0)?.activityInfo?.packageName
-        if (target == null) {
+        if (packageManager.resolveActivity(hotspot, 0) == null) {
             openSystem(Intent(Settings.ACTION_WIRELESS_SETTINGS))
             return
-        }
-        if (target == "com.byd.carsettings") {
-            runCatching { startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)) }
         }
         if (runCatching { startActivity(hotspot) }.isSuccess) return
         openSystem(Intent(Settings.ACTION_WIRELESS_SETTINGS))

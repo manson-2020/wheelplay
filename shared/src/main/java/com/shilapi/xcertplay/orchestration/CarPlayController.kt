@@ -29,7 +29,6 @@ import com.shilapi.xcertplay.airplay.AirPlaySession
 import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.AirPlayTcpAccepted
 import com.shilapi.xcertplay.airplay.PairingStore
-import com.shilapi.xcertplay.hud.BydNavigationOutputs
 import com.shilapi.xcertplay.iap2.message.Iap2NowPlayingCodec
 import com.shilapi.xcertplay.iap2.session.Iap2Session
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
@@ -169,7 +168,6 @@ class CarPlayController(
         require(!config.locationReportingEnabled || locationProvider != null) {
             "A location provider is required when location reporting is enabled"
         }
-        BydNavigationOutputs.start(context.applicationContext)
     }
 
     private enum class Phase { IDLE, MFI, WIRELESS, IPHONE, REENUMERATION, DATAPATHS, CONTROL }
@@ -266,7 +264,6 @@ class CarPlayController(
 
     private val sessionListener = object : AirPlaySessionListener {
         override fun onSessionActive(session: AirPlaySession) {
-            if (activeSession !== session) BydNavigationOutputs.start(appContext)
             activeSession = session
             mediaState.resume()
             debugLog(
@@ -280,7 +277,6 @@ class CarPlayController(
             if (activeSession === session) {
                 activeSession = null
                 mediaState.disconnected()
-                BydNavigationOutputs.endNow()
             }
             debugLog("AirPlay session ended peer=${session.host}")
             uiListener?.onSessionEnded(session)
@@ -404,7 +400,6 @@ class CarPlayController(
             closed = true
         }
         mediaState.close()
-        BydNavigationOutputs.endNow()
         closeReceivers()
         availabilityPollGeneration.incrementAndGet()
         wirelessGeneration.incrementAndGet()
@@ -460,10 +455,8 @@ class CarPlayController(
         }
     }
 
-    // HUD (SOME/IP) and cluster (AMap broadcast) keep separate state so one failing cannot stall the other.
     private fun onControlFrame(source: Iap2Session, frame: Iap2Frame) {
         if (frame.messageId == Iap2NowPlayingCodec.UPDATE) mediaState.receive(source, frame)
-        else BydNavigationOutputs.onFrame(frame)
     }
 
     private fun startMfi() {

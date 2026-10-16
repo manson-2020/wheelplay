@@ -6,7 +6,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import com.shilapi.xcertplay.*
 import com.shilapi.xcertplay.host.R
-import com.shilapi.xcertplay.hud.BydOutputSettings
 import com.shilapi.xcertplay.media.MediaAudioBuffer
 import com.shilapi.xcertplay.network.TeslaHttpMode
 import com.shilapi.xcertplay.orchestration.*
@@ -106,7 +105,6 @@ internal class SettingsViewModel(
                     ToggleSetting.ADAPTIVE_SIZE to AirPlayPersistence.loadAdaptiveBrowserSize(app),
                     ToggleSetting.HEVC to AirPlayPersistence.loadHevcEnabled(app),
                     ToggleSetting.RIGHT_HAND to AirPlayPersistence.loadRightHandDrive(app),
-                    ToggleSetting.NAVIGATION to BydOutputSettings.enabled(app),
                     ToggleSetting.HTTPS to WebListenSettings.httpsEnabled(app),
                     ToggleSetting.TESLA to TeslaHttpCompatibility.config(app).enabled,
                 ),
@@ -131,7 +129,6 @@ internal class SettingsViewModel(
             mdnsHostname = WebListenSettings.mdnsHostname(app),
             certificateType = WebListenSettings.certificateType(app),
             customCertificate = LanTls.hasCustom(app),
-            navigationAvailable = BydOutputSettings.available(app),
             tesla = TeslaHttpCompatibility.config(app),
             browsers = WebSession.rememberedBrowsers(app).list(),
         )
@@ -244,10 +241,6 @@ internal class SettingsViewModel(
                 }
                 ToggleSetting.RIGHT_HAND -> {
                     AirPlayPersistence.saveRightHandDrive(app, checked)
-                    SettingsEffect.None
-                }
-                ToggleSetting.NAVIGATION -> {
-                    BydOutputSettings.setEnabled(app, checked)
                     SettingsEffect.None
                 }
                 ToggleSetting.HTTPS ->

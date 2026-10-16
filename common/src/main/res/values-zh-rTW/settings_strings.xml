@@ -11,7 +11,7 @@
     <string name="settings_audio">音訊與麥克風</string>
     <string name="settings_audio_summary">音訊輸出、麥克風來源、音訊緩衝</string>
     <string name="settings_vehicle">車廠與定位</string>
-    <string name="settings_vehicle_summary">OEM 名稱和圖示、定位來源、導航輸出</string>
+    <string name="settings_vehicle_summary">OEM 名稱和圖示、定位來源</string>
     <string name="settings_browser">瀏覽器裝置</string>
     <string name="settings_browser_summary">裝置管理、瀏覽器離線後的處理</string>
     <string name="settings_web">Web 服務</string>
@@ -107,10 +107,6 @@
     <string name="settings_location_iphone">iPhone 自身定位（預設）</string>
     <string name="settings_location_android">Android 裝置定位</string>
     <string name="settings_location_description">預設由 iPhone 和導航 App 定位。選擇 Android 後，在 iPhone 請求時提供這臺裝置的定位資料，需要 Android 精確定位權限。下次連線 iPhone 生效。</string>
-    <string name="settings_navigation">導航輸出</string>
-    <string name="settings_navigation_manufacturer">適用於相容的 %1$s 裝置。</string>
-    <string name="settings_navigation_output">抬頭顯示與儀表導航</string>
-    <string name="settings_navigation_description">顯示導航箭頭、距離與路名，支援情況取決於車型。</string>
     <string name="settings_web_listeners">Web 監聽</string>
     <string name="settings_http_port">HTTP 埠</string>
     <string name="settings_https_port">Web HTTPS 埠</string>

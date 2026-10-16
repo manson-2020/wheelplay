@@ -70,20 +70,6 @@ internal fun VehicleSettingsScreen(state: SettingsState, actions: SettingsAction
         )
         SettingsDescription(R.string.settings_location_description)
     }
-    if (state.navigationAvailable)
-        SettingsGroup(R.string.settings_navigation) {
-            Text(
-                settingsString(R.string.settings_navigation_manufacturer, state.manufacturer),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            SettingsToggle(
-                state,
-                actions,
-                ToggleSetting.NAVIGATION,
-                R.string.settings_navigation_output,
-                R.string.settings_navigation_description,
-            )
-        }
     if (reset)
         SettingsConfirmation(
             R.string.settings_reset_branding_title,

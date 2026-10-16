@@ -46,7 +46,6 @@ internal enum class ToggleSetting {
     ADAPTIVE_SIZE,
     HEVC,
     RIGHT_HAND,
-    NAVIGATION,
     HTTPS,
     TESLA,
 }
@@ -105,7 +104,6 @@ internal data class SettingsState(
     val certificateType: WebListenSettings.CertificateType =
         WebListenSettings.CertificateType.DEFAULT,
     val customCertificate: Boolean = false,
-    val navigationAvailable: Boolean = false,
     val tesla: TeslaHttpConfig = TeslaHttpConfig(),
     val browsers: List<RememberedBrowsers.Device> = emptyList(),
     val runtime: SettingsRuntime = SettingsRuntime(),

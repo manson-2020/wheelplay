@@ -11,7 +11,7 @@
     <string name="settings_audio">Audio &amp; microphone</string>
     <string name="settings_audio_summary">Audio output, microphone source, audio buffering</string>
     <string name="settings_vehicle">Vehicle &amp; location</string>
-    <string name="settings_vehicle_summary">OEM name and icon, location source, navigation output</string>
+    <string name="settings_vehicle_summary">OEM name and icon, location source</string>
     <string name="settings_browser">Browser devices</string>
     <string name="settings_browser_summary">Device management and offline behavior</string>
     <string name="settings_web">Web service</string>
@@ -107,10 +107,6 @@
     <string name="settings_location_iphone">iPhone location (default)</string>
     <string name="settings_location_android">Android device location</string>
     <string name="settings_location_description">The iPhone and navigation app provide location by default. Selecting Android sends this device\'s location when requested by the iPhone and requires precise location permission. Applies on the next iPhone connection.</string>
-    <string name="settings_navigation">Navigation output</string>
-    <string name="settings_navigation_manufacturer">For compatible %1$s devices.</string>
-    <string name="settings_navigation_output">Head-up display &amp; instrument navigation</string>
-    <string name="settings_navigation_description">Show navigation arrows, distance and road names. Support depends on the vehicle.</string>
     <string name="settings_web_listeners">Web listeners</string>
     <string name="settings_http_port">HTTP port</string>
     <string name="settings_https_port">Web HTTPS port</string>
