@@ -654,17 +654,23 @@ internal class LanWebServer(
                                     .put("type", "status")
                                     .put("width", WebSession.width)
                                     .put("height", WebSession.height)
-                                    .put("stage", WebSession.stage(context))
+                                    .put(
+                                        "stage",
+                                        if (WebSession.localDisplayActive) context.getString(UiR.string.web_displayed_on_phone)
+                                        else WebSession.stage(context),
+                                    )
                                     .put(
                                         "streaming",
-                                        WebSession.videoActive &&
+                                        !WebSession.localDisplayActive &&
+                                            WebSession.videoActive &&
                                             (frame != null ||
                                                 rtc?.connected == true ||
                                                 rtc?.holdingFrame == true),
                                     )
                                     .put(
                                         "rtcAvailable",
-                                        rtcConfig != null && !rtcAttempted && WebSession.videoActive,
+                                        rtcConfig != null && !rtcAttempted && WebSession.videoActive &&
+                                            !WebSession.localDisplayActive,
                                     )
                                     .put("rtcFrames", rtc?.sentFrames ?: 0)
                                     .put(

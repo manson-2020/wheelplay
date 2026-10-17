@@ -70,7 +70,12 @@
     <string name="ui_iphone_session">iPhone session</string>
     <string name="ui_waiting_to_connect_to_iphone">Waiting to connect to iPhone</string>
     <string name="ui_connect">Connect</string>
-    <string name="ui_manage_iphone_connection">Manage iPhone connection</string>
+    <string name="ui_show_carplay_on_this_phone">Show CarPlay on this phone</string>
+    <string name="ui_default_stream_to_browser">Head-unit browser (stream)</string>
+    <string name="ui_default_show_on_phone">This phone (in-app)</string>
+    <string name="ui_local_display_no_session">No iPhone is connected. Connect CarPlay first.</string>
+    <string name="ui_local_display_connecting">Loading CarPlay…</string>
+    <string name="web_displayed_on_phone">CarPlay is shown on this phone, so streaming to the head unit is paused.</string>
     <string name="ui_audio_and_microphone_use_this_device_by_default_enable">Audio and microphone use this device by default. Enable browser forwarding for each in app settings.</string>
     <string name="ui_stop_service">Stop service</string>
     <string name="ui_import_authentication_resources_to_activate_the_web_service">Import authentication resources to activate the Web service</string>

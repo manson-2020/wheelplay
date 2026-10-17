@@ -23,6 +23,8 @@ internal sealed interface SettingsEffect {
     data class WebUpdate(val message: String, val operation: () -> String?) : SettingsEffect
 
     data class TeslaEnabled(val enabled: Boolean) : SettingsEffect
+
+    data class KeepScreenOnEnabled(val enabled: Boolean) : SettingsEffect
 }
 
 /** Owns preference persistence and navigation. It never retains an Activity or a View. */
@@ -69,6 +71,7 @@ internal class SettingsViewModel(
             choices =
                 mapOf(
                     ChoiceSetting.APPEARANCE to AirPlayPersistence.loadAppearance(app).ordinal,
+                    ChoiceSetting.DEFAULT_VIEW to AirPlayPersistence.loadDefaultView(app).ordinal,
                     ChoiceSetting.RESOLUTION to
                         listOf(10, 8, 6)
                             .indexOf(AirPlayPersistence.loadDisplayScaleTenths(app))
@@ -102,6 +105,7 @@ internal class SettingsViewModel(
                 mapOf(
                     ToggleSetting.AUTO_CONNECT to DiPlayPreferences.autoConnect(app),
                     ToggleSetting.AUTO_START to AirPlayPersistence.loadAutoStartOnBoot(app),
+                    ToggleSetting.KEEP_SCREEN_ON to DiPlayPreferences.keepScreenOn(app),
                     ToggleSetting.ADAPTIVE_SIZE to AirPlayPersistence.loadAdaptiveBrowserSize(app),
                     ToggleSetting.HEVC to AirPlayPersistence.loadHevcEnabled(app),
                     ToggleSetting.RIGHT_HAND to AirPlayPersistence.loadRightHandDrive(app),
@@ -139,6 +143,21 @@ internal class SettingsViewModel(
             when (setting) {
                 ChoiceSetting.APPEARANCE -> {
                     WebSession.setAppearance(app, CarPlayAppearance.entries[index])
+                    SettingsEffect.None
+                }
+                ChoiceSetting.DEFAULT_VIEW -> {
+                    val view = CarPlayDefaultView.entries[index]
+                    AirPlayPersistence.saveDefaultView(app, view)
+                    // Record the canvas this view wants so the next auto-connect starts at the right
+                    // size: the phone's own dp size on-phone, or the native 1920x1200 for the browser.
+                    val size =
+                        if (view == CarPlayDefaultView.PHONE_DISPLAY) CarPlayPhoneDisplay.landscapeDp(app)
+                        else AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_WIDTH to AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_HEIGHT
+                    AirPlayPersistence.saveDefaultDisplaySize(
+                        app,
+                        size?.first ?: AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_WIDTH,
+                        size?.second ?: AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_HEIGHT,
+                    )
                     SettingsEffect.None
                 }
                 ChoiceSetting.RESOLUTION -> {
@@ -229,6 +248,10 @@ internal class SettingsViewModel(
                 ToggleSetting.AUTO_START -> {
                     AirPlayPersistence.saveAutoStartOnBoot(app, checked)
                     SettingsEffect.None
+                }
+                ToggleSetting.KEEP_SCREEN_ON -> {
+                    DiPlayPreferences.saveKeepScreenOn(app, checked)
+                    SettingsEffect.KeepScreenOnEnabled(checked)
                 }
                 ToggleSetting.ADAPTIVE_SIZE -> {
                     AirPlayPersistence.saveAdaptiveBrowserSize(app, checked)

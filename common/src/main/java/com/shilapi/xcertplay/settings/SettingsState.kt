@@ -26,6 +26,7 @@ internal enum class SettingsCategory(
 
 internal enum class ChoiceSetting {
     APPEARANCE,
+    DEFAULT_VIEW,
     RESOLUTION,
     FPS,
     STREAM,
@@ -43,6 +44,7 @@ internal enum class ChoiceSetting {
 internal enum class ToggleSetting {
     AUTO_CONNECT,
     AUTO_START,
+    KEEP_SCREEN_ON,
     ADAPTIVE_SIZE,
     HEVC,
     RIGHT_HAND,

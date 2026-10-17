@@ -44,4 +44,8 @@ internal object DiPlayPreferences {
     fun saveAutoConnect(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean("auto_connect", value).apply()
     }
+    fun keepScreenOn(context: Context) = prefs(context).getBoolean("keep_screen_on", true)
+    fun saveKeepScreenOn(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean("keep_screen_on", value).apply()
+    }
 }

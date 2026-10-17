@@ -433,7 +433,7 @@ class CarPlayHostActivity : ComponentActivity() {
         loadPersistedSettings()
         locationPermissionAvailable = hasFineLocationPermission()
         setContentView(buildContentView().also(ServerWindow::fitContent))
-        activeDisplaySize = DEFAULT_BROWSER_DISPLAY
+        activeDisplaySize = defaultDisplaySize()
         WebSession.setBrowserViewportListener { width, height ->
             mainHandler.post { scheduleBrowserDisplaySize(width, height) }
         }
@@ -3045,10 +3045,20 @@ class CarPlayHostActivity : ComponentActivity() {
         return File(filesDir, AUDIO_CAPTURE_DIRECTORY)
     }
 
+    /**
+     * The canvas to negotiate when no head-unit browser viewport is in play: the size recorded when
+     * the default view was chosen (the phone's own dp size on-phone, or 1920x1200 for the browser),
+     * falling back to the native browser default until that option is first saved. Reading it here and
+     * in the preview keeps both on the same number, so opening the on-phone display never reconnects.
+     */
+    private fun defaultDisplaySize(): DisplaySize =
+        AirPlayPersistence.loadDefaultDisplaySize(this)?.let { (width, height) -> DisplaySize(width, height) }
+            ?: DEFAULT_BROWSER_DISPLAY
+
     private fun scheduleDisplaySize(width: Int, height: Int) {
         if (width <= 0 || height <= 0 || shuttingDown.get()) return
         val browserSize = WebSession.currentBrowserViewport.takeIf { WebSession.adaptiveBrowserSize }
-        val size = browserSize?.let { DisplaySize(it.first, it.second) } ?: DEFAULT_BROWSER_DISPLAY
+        val size = browserSize?.let { DisplaySize(it.first, it.second) } ?: defaultDisplaySize()
         if (size == activeDisplaySize || size == pendingDisplaySize) return
         appendLog("Display size scheduled: ${size.width}x${size.height} source=${if (browserSize != null) "browser" else "DEFAULT"}")
         pendingDisplaySize = size
@@ -3060,7 +3070,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (shuttingDown.get()) return
         val source = if (width == null || height == null) "DEFAULT" else "browser"
         val size = if (width == null || height == null) {
-            DEFAULT_BROWSER_DISPLAY
+            defaultDisplaySize()
         } else {
             val scale = minOf(1.0, 3840.0 / width, 2160.0 / height)
             fun even(value: Double) = (value.toInt().coerceAtLeast(2) / 2) * 2
@@ -3197,6 +3207,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun showDiPlayHome(page: String = "home") {
         controller?.sendTouch(emptyList())
+        // While the picture is shown on the phone, the preview owns the foreground. An adaptive
+        // reconnect rebuilds the session and must not navigate away to the dashboard, which would
+        // destroy the preview surface mid-renegotiation and leave the display half-resized.
+        if (WebSession.localDisplayActive) return
         startActivity(Intent(this, DiPlayActivity::class.java)
             .putExtra("page", page).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NO_ANIMATION))
         overridePendingTransition(0, 0)
@@ -3355,8 +3369,24 @@ class CarPlayHostActivity : ComponentActivity() {
                 activeScreenStreamTypes.remove(type)
             }
             WebSession.videoActive = activeScreenStreamTypes.isNotEmpty()
+            if (type == SCREEN_TYPE_MAIN && active) maybeAutoOpenPhoneDisplay()
             updateDebugOverlays()
         }
+    }
+
+    /**
+     * When the user's default is the on-phone display, launch it automatically the first time the
+     * main CarPlay picture goes live. The host owns the foreground during the launch auto-connect
+     * (the dashboard is paused, so its own auto-open check never runs); this covers that path. The
+     * gate is the shared one-shot CarPlayBackgroundSession.phoneDisplayConsumed: leaving the preview
+     * restores the browser viewport and renegotiates the canvas, which re-activates the main screen
+     * - a per-instance flag would loop there, so consumption is process-wide and survives recreation.
+     */
+    private fun maybeAutoOpenPhoneDisplay() {
+        if (CarPlayBackgroundSession.phoneDisplayConsumed || WebSession.localDisplayActive) return
+        if (AirPlayPersistence.loadDefaultView(this) != CarPlayDefaultView.PHONE_DISPLAY) return
+        CarPlayBackgroundSession.phoneDisplayConsumed = true
+        startActivity(Intent(this, CarPlayLocalPreviewActivity::class.java))
     }
 
     private fun setStatus(message: String) {
@@ -3524,6 +3554,12 @@ class CarPlayHostActivity : ComponentActivity() {
 /** Process-local hand-off for keeping the CarPlay session alive while no Activity is visible. */
 internal object CarPlayBackgroundSession {
     @Volatile var active = false
+    // One-shot auto-open gate shared by the host and dashboard hooks. Armed (false) when a fresh
+    // connection is initiated; consumed (true) the first time the on-phone display is opened. It is
+    // never reset by renegotiation, a browser reconnect or an Activity recreation, which is what
+    // stops the exit -> browser -> auto-enter-fullscreen loop.
+    @Volatile var phoneDisplayConsumed = false
+
     private var stopAction: (((() -> Unit)) -> Unit)? = null
     private var stopping = false
     private var owner: Any? = null

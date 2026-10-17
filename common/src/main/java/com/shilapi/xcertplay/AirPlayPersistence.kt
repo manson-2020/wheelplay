@@ -69,6 +69,9 @@ object AirPlayPersistence {
     private const val KEY_BROWSER_MICROPHONE = "browser_microphone"
     private const val KEY_MICROPHONE_SOURCE = "microphone_source"
     private const val KEY_APPEARANCE = "carplay_appearance"
+    private const val KEY_DEFAULT_VIEW = "carplay_default_view"
+    private const val KEY_DEFAULT_DISPLAY_WIDTH = "carplay_default_display_width"
+    private const val KEY_DEFAULT_DISPLAY_HEIGHT = "carplay_default_display_height"
     private const val KEY_BROWSER_OFFLINE = "browser_offline_policy"
     private const val KEY_SAFE_MARGINS = "carplay_safe_margins"
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
@@ -84,6 +87,11 @@ object AirPlayPersistence {
     const val DEFAULT_MODEL = "WheelPlay"
     const val DEFAULT_SIMULATED_MANUFACTURER_NAME = "Tesla"
     const val DEFAULT_MFI_I2C_PATH = "/dev/i2c-1"
+
+    // The native 15.4" Tesla touchscreen resolution, kept as the browser-view default canvas so iOS
+    // stays on a 1x scale for a dense dashboard.
+    const val BROWSER_DEFAULT_DISPLAY_WIDTH = 1920
+    const val BROWSER_DEFAULT_DISPLAY_HEIGHT = 1200
 
     fun loadBrowserAudioPlayback(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_BROWSER_AUDIO_PLAYBACK, false)
@@ -116,6 +124,30 @@ object AirPlayPersistence {
     } ?: CarPlayAppearance.SYSTEM
     fun saveAppearance(context: Context, value: CarPlayAppearance) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_APPEARANCE, value.name).apply()
+    }
+    fun loadDefaultView(context: Context): CarPlayDefaultView = CarPlayDefaultView.entries.firstOrNull {
+        it.name == context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_DEFAULT_VIEW, null)
+    } ?: CarPlayDefaultView.BROWSER_STREAM
+    fun saveDefaultView(context: Context, value: CarPlayDefaultView) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_DEFAULT_VIEW, value.name).apply()
+    }
+
+    /**
+     * The canvas recorded when the default view is chosen: 1920x1200 for the head-unit browser, or
+     * the phone's own size for the on-phone display. Null until the user first saves the option, in
+     * which case callers fall back to the native browser default. It is read on the next launch so
+     * the auto-connect session starts already at the right size and never renegotiates on preview.
+     */
+    fun loadDefaultDisplaySize(context: Context): Pair<Int, Int>? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val width = prefs.getInt(KEY_DEFAULT_DISPLAY_WIDTH, 0)
+        val height = prefs.getInt(KEY_DEFAULT_DISPLAY_HEIGHT, 0)
+        return if (width > 0 && height > 0) width to height else null
+    }
+
+    fun saveDefaultDisplaySize(context: Context, width: Int, height: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_DEFAULT_DISPLAY_WIDTH, width).putInt(KEY_DEFAULT_DISPLAY_HEIGHT, height).apply()
     }
     fun loadBrowserOfflinePolicy(context: Context): BrowserOfflinePolicy = BrowserOfflinePolicy.entries.firstOrNull {
         it.name == context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_BROWSER_OFFLINE, null)

@@ -84,9 +84,16 @@ internal object WebSession {
     val currentBrowserViewport: Pair<Int, Int>?
         get() = browserViewport
 
+    // True while the CarPlay picture is shown on the phone: the browser stream and its touch are
+    // paused, and the negotiated canvas follows the phone screen instead of the head-unit browser.
+    @Volatile var localDisplayActive = false
+        private set
+    @Volatile private var localPhoneViewport: Pair<Int, Int>? = null
+
     @Volatile private var browserViewportListener: ((Int?, Int?) -> Unit)? = null
     val touch = TouchLease { contacts ->
-        CarPlayBackgroundSession.snapshot()?.controller?.sendTouch(contacts) ?: false
+        if (localDisplayActive) false
+        else CarPlayBackgroundSession.snapshot()?.controller?.sendTouch(contacts) ?: false
     }
     val running
         get() = server?.ready == true
@@ -616,14 +623,63 @@ internal object WebSession {
 
     fun setAdaptiveBrowserSize(enabled: Boolean) {
         adaptiveBrowserSize = enabled
-        val size = if (enabled) browserViewport else null
-        browserViewportListener?.invoke(size?.first, size?.second)
+        notifyViewport()
     }
 
     fun setBrowserViewportListener(listener: ((Int?, Int?) -> Unit)?) {
         browserViewportListener = listener
-        val size = if (adaptiveBrowserSize) browserViewport else null
-        listener?.invoke(size?.first, size?.second)
+        val size = effectiveViewport()
+        listener?.invoke(size.first, size.second)
+    }
+
+    /**
+     * The canvas the host should negotiate for: the phone screen while the picture is shown locally
+     * (and adaptive sizing is on), otherwise the head-unit browser viewport, or null for the fixed
+     * default display.
+     */
+    private fun effectiveViewport(): Pair<Int?, Int?> {
+        if (localDisplayActive && adaptiveBrowserSize) localPhoneViewport?.let { return it.first to it.second }
+        if (!adaptiveBrowserSize) return null to null
+        val viewport = browserViewport ?: return null to null
+        return viewport.first to viewport.second
+    }
+
+    private fun notifyViewport() {
+        val size = effectiveViewport()
+        browserViewportListener?.invoke(size.first, size.second)
+    }
+
+    /**
+     * Pause the browser stream and drive the negotiated canvas from the phone screen so the picture
+     * fills the phone (an adaptive reconnect when sizing is on). Browser touch is ignored until
+     * [endLocalDisplay]; the preview re-attaches to the rebuilt sink on the session change.
+     */
+    fun beginLocalDisplay(width: Int, height: Int) {
+        localPhoneViewport =
+            if (
+                width in MIN_VIEWPORT_PIXELS..MAX_VIEWPORT_PIXELS &&
+                    height in MIN_VIEWPORT_PIXELS..MAX_VIEWPORT_PIXELS &&
+                    width.toDouble() / height in MIN_VIEWPORT_ASPECT..MAX_VIEWPORT_ASPECT
+            ) {
+                width to height
+            } else {
+                null
+            }
+        localDisplayActive = true
+        notifyViewport()
+    }
+
+    /**
+     * Resume the browser stream. Renegotiate the canvas back to the head-unit viewport only when a
+     * browser is actually watching; with no viewer the canvas stays at the phone size the preview
+     * negotiated, so returning to the home no longer forces a redundant CarPlay restart - the browser
+     * drives its own adaptive reconnect through [reportBrowserViewport] when it opens.
+     */
+    fun endLocalDisplay() {
+        if (!localDisplayActive) return
+        localDisplayActive = false
+        localPhoneViewport = null
+        if (hasViewer) notifyViewport()
     }
 
     fun reportBrowserViewport(width: Int, height: Int): Boolean {
@@ -645,7 +701,8 @@ internal object WebSession {
             "WheelPlayWeb",
             "viewport accepted t=${SystemClock.elapsedRealtime()} ${width}x$height ratio=$ratio adaptive=$adaptiveBrowserSize",
         )
-        if (adaptiveBrowserSize) browserViewportListener?.invoke(width, height)
+        // A browser resize never steals the canvas while the picture is shown on the phone.
+        if (adaptiveBrowserSize && !localDisplayActive) browserViewportListener?.invoke(width, height)
         return true
     }
 

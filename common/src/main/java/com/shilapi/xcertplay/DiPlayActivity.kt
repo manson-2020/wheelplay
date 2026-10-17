@@ -113,6 +113,7 @@ class DiPlayActivity : AppCompatActivity() {
     private var webViewer: TextView? = null
     private var webStage: TextView? = null
     private var sessionConnectButton: Button? = null
+    private var localPreviewButton: Button? = null
     private var setupError: String? = null
     private var status: TextView? = null
     private var connectButton: com.google.android.material.button.MaterialButton? = null
@@ -126,7 +127,7 @@ class DiPlayActivity : AppCompatActivity() {
         connect(notificationTransport)
     }
     private val tick = object : Runnable {
-        override fun run() { refreshStatus(); refreshService(); refreshSettingsRuntime(); handler.postDelayed(this, 1000) }
+        override fun run() { refreshStatus(); refreshService(); refreshSettingsRuntime(); maybeAutoOpenPhoneDisplay(); handler.postDelayed(this, 1000) }
     }
     private val bluetoothPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) choosePhone() else permissionHelp(getString(UiR.string.ui_nearby_devices), getString(UiR.string.ui_allow_access_to_nearby_devices_to_connect_to_a))
@@ -210,6 +211,7 @@ class DiPlayActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         if (TeslaHttpCompatibility.config(this).let { it.enabled && it.mode == TeslaHttpMode.ROOT }) RootAccess.checkOnStartup()
         ServerWindow.showSystemBars(window)
+        applyKeepScreenOn()
         refreshAuthentication()
         selectedPrivateKey = savedInstanceState?.getString("selectedPrivateKey")?.let(Uri::parse)
         awaitingTeslaVpnConsent = savedInstanceState?.getBoolean("awaitingTeslaVpnConsent") ?: false
@@ -257,7 +259,7 @@ class DiPlayActivity : AppCompatActivity() {
         createShell()
     }
     override fun onResume() {
-        super.onResume(); refreshAuthentication(); render(); ServerWindow.showSystemBars(window); handler.removeCallbacks(tick); handler.post(tick)
+        super.onResume(); refreshAuthentication(); applyKeepScreenOn(); render(); ServerWindow.showSystemBars(window); handler.removeCallbacks(tick); handler.post(tick)
         WebSession.setPhoneConnectHandler {
             if (setupError != null) setupError!!
             else {
@@ -394,7 +396,18 @@ class DiPlayActivity : AppCompatActivity() {
             }
             is SettingsEffect.WebUpdate -> configureWeb(effect.message, effect.operation)
             is SettingsEffect.TeslaEnabled -> setTeslaHttpEnabled(effect.enabled)
+            is SettingsEffect.KeepScreenOnEnabled -> {
+                applyKeepScreenOn(effect.enabled)
+                // Restarting the service re-evaluates the partial wake lock behind the session CPU.
+                if (effect.enabled) startWebServiceIfReady()
+            }
         }
+    }
+
+    /** Keeps the interface awake so the system does not suspend while the app is shown. */
+    private fun applyKeepScreenOn(enabled: Boolean = DiPlayPreferences.keepScreenOn(this)) {
+        val flag = android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        if (enabled) window.addFlags(flag) else window.clearFlags(flag)
     }
 
     private fun settingsCommand(command: SettingsCommand) {
@@ -465,7 +478,10 @@ class DiPlayActivity : AppCompatActivity() {
                 if (!CarPlayBackgroundSession.hasSession()) connect(true)
             }.apply { visibility = View.GONE }
             body.addView(sessionConnectButton, ui.secondaryButtonLayout(12))
-            body.addView(button(getString(UiR.string.ui_manage_iphone_connection), false) { navigate("phone") }, ui.secondaryButtonLayout(16))
+            localPreviewButton = button(getString(UiR.string.ui_show_carplay_on_this_phone), false, R.drawable.ic_server_launch) {
+                startActivity(Intent(this, CarPlayLocalPreviewActivity::class.java))
+            }.apply { visibility = View.GONE }
+            body.addView(localPreviewButton, ui.secondaryButtonLayout(12))
         }
         content.addView(label(getString(UiR.string.ui_audio_and_microphone_use_this_device_by_default_enable), 14, MUTED))
         content.addView(button(getString(UiR.string.ui_stop_service), false) {
@@ -501,6 +517,24 @@ class DiPlayActivity : AppCompatActivity() {
         webViewer?.text = if (!WebSession.running && setupError != null) getString(UiR.string.ui_import_authentication_resources_to_pair_a_browser)
             else if (viewerConnected) getString(UiR.string.ui_head_unit_browser_connected) else getString(UiR.string.ui_waiting_for_head_unit_browser)
         webStage?.text = setupError ?: if (WebSession.videoActive) getString(UiR.string.ui_streaming_carplay_video) else WebSession.stage(this)
+        localPreviewButton?.visibility = if (CarPlayBackgroundSession.snapshot() != null) View.VISIBLE else View.GONE
+        // Entering the phone display re-negotiates the session, so block it until CarPlay is connected.
+        localPreviewButton?.isEnabled = CarPlayBackgroundSession.active
+    }
+
+    /**
+     * When the user's default is the on-phone display, open it automatically once CarPlay video is
+     * live. Runs from the resumed home (Android blocks background activity starts). The gate is the
+     * shared one-shot CarPlayBackgroundSession.phoneDisplayConsumed - armed per connection in
+     * openProjection and never reset by renegotiation or a browser reconnect, so leaving the
+     * preview cannot loop the fullscreen back on.
+     */
+    private fun maybeAutoOpenPhoneDisplay() {
+        if (!CarPlayBackgroundSession.active || !WebSession.videoActive) return
+        if (CarPlayBackgroundSession.phoneDisplayConsumed || WebSession.localDisplayActive) return
+        if (AirPlayPersistence.loadDefaultView(this) != CarPlayDefaultView.PHONE_DISPLAY) return
+        CarPlayBackgroundSession.phoneDisplayConsumed = true
+        startActivity(Intent(this, CarPlayLocalPreviewActivity::class.java))
     }
 
     private fun openLocalBrowserExperience() {
@@ -716,6 +750,9 @@ class DiPlayActivity : AppCompatActivity() {
         else open()
     }
     private fun openProjection() {
+        // A user-initiated (re)connection re-arms the one-shot auto-open gate; renegotiation and
+        // browser reconnects do not pass through here, so they can never re-trigger the fullscreen.
+        CarPlayBackgroundSession.phoneDisplayConsumed = false
         navigate("service")
         startActivity(Intent(this, CarPlayHostActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NO_ANIMATION))

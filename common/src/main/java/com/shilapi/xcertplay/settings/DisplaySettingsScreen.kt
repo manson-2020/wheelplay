@@ -33,6 +33,14 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
         CarPlayAppearance.entries.map { settingsString(it.labelRes) },
     )
     SettingsDescription(R.string.settings_appearance_description)
+    SettingsChoice(
+        state,
+        actions,
+        ChoiceSetting.DEFAULT_VIEW,
+        R.string.settings_default_view,
+        CarPlayDefaultView.entries.map { settingsString(it.labelRes) },
+    )
+    SettingsDescription(R.string.settings_default_view_description)
     SettingsSlider(
         title = R.string.settings_display_size,
         initial = state.displayWidthMm,

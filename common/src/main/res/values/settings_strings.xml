@@ -37,6 +37,8 @@
     <string name="settings_auto_connect_description">Use the last connection method and selected iPhone.</string>
     <string name="settings_auto_start">Open after device startup</string>
     <string name="settings_auto_start_description">Requires the system to allow automatic startup.</string>
+    <string name="settings_keep_screen_on">Keep the screen awake in the app</string>
+    <string name="settings_keep_screen_on_description">Prevents the system from sleeping while the app is shown, so the session is not suspended or killed.</string>
     <string name="settings_iphone">iPhone</string>
     <string name="settings_unselected">Not selected</string>
     <string name="settings_wireless_connection">Wireless connection</string>
@@ -58,6 +60,8 @@
     <string name="settings_microphone_description">Reconnects after changes. The browser microphone requires trusted HTTPS and permission; Android is used until it is ready. Disabling stops uploads and removes the microphone capability.</string>
     <string name="settings_appearance">CarPlay day/night mode</string>
     <string name="settings_appearance_description">Sent to the iPhone immediately. Follow Android uses this service device\'s system day/night mode.</string>
+    <string name="settings_default_view">Show CarPlay on</string>
+    <string name="settings_default_view_description">Choose where CarPlay goes after the iPhone connects. The phone option opens the in-app display automatically; the browser option streams to the head unit.</string>
     <string name="settings_display_size">CarPlay icon and text size</string>
     <string name="settings_display_size_description">A larger value makes CarPlay icons and text smaller (reported as a simulated screen width in mm). Applying reconnects the iPhone.</string>
     <string name="settings_legacy_safe_area">Keep existing safe area</string>
@@ -65,8 +69,8 @@
     <string name="settings_safe_area_value">Top %1$d%% · Bottom %2$d%% · Left %3$d%% · Right %4$d%%</string>
     <string name="settings_safe_area">Display safe area</string>
     <string name="settings_safe_area_description">Add margins where head-unit controls cover the edges, scaled to the display resolution. Saving reconnects the iPhone to lay out CarPlay inside the safe area. Touch coordinates still cover the full display.</string>
-    <string name="settings_adaptive_size">Adapt to browser size</string>
-    <string name="settings_adaptive_size_description">Negotiate the CarPlay resolution using the browser\'s actual aspect ratio. Browser size changes reconnect the iPhone.</string>
+    <string name="settings_adaptive_size">Adapt to screen size</string>
+    <string name="settings_adaptive_size_description">Negotiate the CarPlay resolution using the device screen or browser aspect ratio. Size changes reconnect the iPhone.</string>
     <string name="settings_resolution">Resolution</string>
     <string name="settings_original_resolution">Original resolution</string>
     <string name="settings_resolution_lower" formatted="false">80% · Lower load</string>

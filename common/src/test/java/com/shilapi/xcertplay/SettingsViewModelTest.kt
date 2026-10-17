@@ -73,6 +73,47 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun keepScreenOnDefaultsToEnabledAndPersistsToggleChanges() {
+        val model = SettingsViewModel(app, SavedStateHandle())
+        assertTrue(model.state.value.checked(ToggleSetting.KEEP_SCREEN_ON))
+        assertEquals(
+            SettingsEffect.KeepScreenOnEnabled(false),
+            model.toggle(ToggleSetting.KEEP_SCREEN_ON, false),
+        )
+        assertFalse(DiPlayPreferences.keepScreenOn(app))
+        assertFalse(model.state.value.checked(ToggleSetting.KEEP_SCREEN_ON))
+        model.toggle(ToggleSetting.KEEP_SCREEN_ON, true)
+        assertTrue(DiPlayPreferences.keepScreenOn(app))
+    }
+
+    @Test
+    fun defaultViewRecordsBrowserSizeAndPhoneSizeAsTheDefaultCanvas() {
+        val model = SettingsViewModel(app, SavedStateHandle())
+        model.choose(ChoiceSetting.DEFAULT_VIEW, CarPlayDefaultView.PHONE_DISPLAY.ordinal)
+        assertEquals(CarPlayPhoneDisplay.landscapeDp(app), AirPlayPersistence.loadDefaultDisplaySize(app))
+        model.choose(ChoiceSetting.DEFAULT_VIEW, CarPlayDefaultView.BROWSER_STREAM.ordinal)
+        assertEquals(
+            AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_WIDTH to AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_HEIGHT,
+            AirPlayPersistence.loadDefaultDisplaySize(app),
+        )
+    }
+
+    @Test
+    fun defaultViewDefaultsToBrowserStreamAndPersistsPhoneSelection() {
+        val model = SettingsViewModel(app, SavedStateHandle())
+        assertEquals(
+            CarPlayDefaultView.BROWSER_STREAM.ordinal,
+            model.state.value.selected(ChoiceSetting.DEFAULT_VIEW),
+        )
+        assertEquals(SettingsEffect.None, model.choose(ChoiceSetting.DEFAULT_VIEW, CarPlayDefaultView.PHONE_DISPLAY.ordinal))
+        assertEquals(CarPlayDefaultView.PHONE_DISPLAY, AirPlayPersistence.loadDefaultView(app))
+        assertEquals(
+            CarPlayDefaultView.PHONE_DISPLAY.ordinal,
+            model.state.value.selected(ChoiceSetting.DEFAULT_VIEW),
+        )
+    }
+
+    @Test
     fun changingTeslaModeDisablesThePreviousRouteAndRejectsInvalidPorts() {
         TeslaHttpCompatibility.save(app, TeslaHttpConfig(enabled = true))
         val model = SettingsViewModel(app, SavedStateHandle())

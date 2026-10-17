@@ -70,7 +70,12 @@
     <string name="ui_iphone_session">iPhone 会话</string>
     <string name="ui_waiting_to_connect_to_iphone">等待连接 iPhone</string>
     <string name="ui_connect">连接</string>
-    <string name="ui_manage_iphone_connection">管理 iPhone 连接</string>
+    <string name="ui_show_carplay_on_this_phone">在本机显示 CarPlay 画面</string>
+    <string name="ui_default_stream_to_browser">车机浏览器（串流）</string>
+    <string name="ui_default_show_on_phone">本机（App 内显示）</string>
+    <string name="ui_local_display_no_session">尚未连接 iPhone，请先连接 CarPlay。</string>
+    <string name="ui_local_display_connecting">正在加载 CarPlay 画面…</string>
+    <string name="web_displayed_on_phone">CarPlay 画面已在手机上显示，车机串流已暂停。</string>
     <string name="ui_audio_and_microphone_use_this_device_by_default_enable">音频与麦克风默认使用此设备，可在 App 设置中分别启用浏览器转发。</string>
     <string name="ui_stop_service">停止服务</string>
     <string name="ui_import_authentication_resources_to_activate_the_web_service">请先导入认证资源以激活 Web 服务</string>

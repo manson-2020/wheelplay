@@ -106,6 +106,10 @@ class AndroidMediaSink(
     private val pendingVideoCodec = ConcurrentHashMap<Int, VideoCodec>()
     private val videoConfigs = ConcurrentHashMap<Int, ByteArray>()
     private val suspendedVideo = ConcurrentHashMap.newKeySet<Int>()
+    // Screen types currently shown on the phone. While a type is here the browser stream for it is
+    // paused - the on-screen decoder becomes its sole consumer, so phone display and streaming
+    // never run at the same time.
+    private val localDisplayTypes = ConcurrentHashMap.newKeySet<Int>()
     private val videoRecoveryHandlers = ConcurrentHashMap<Int, () -> Unit>()
     private val videoDiagnosticHandlers = ConcurrentHashMap<Int, (String) -> Unit>()
     private val recoveryPending = AtomicBoolean(false)
@@ -142,6 +146,39 @@ class AndroidMediaSink(
         if (surfaces.remove(type, surface)) videoDecoders[type]?.setSurface(null)
     }
 
+    /**
+     * Show one CarPlay screen on the phone. While it is active the browser stream for this screen
+     * is paused - the phone becomes the sole consumer of its frames. A keyframe is requested so the
+     * on-screen decoder, which WebRTC normally suspends, restarts immediately onto this surface.
+     */
+    fun requestLocalDisplay(type: Int, surface: Surface) {
+        localDisplayTypes.add(type)
+        setSurface(type, surface)
+        requestVideoRecovery(type)
+    }
+
+    /**
+     * Stop the on-phone display for one screen and resume pushing it to the browser. A keyframe is
+     * requested so the browser restarts the stream from a random-access point.
+     */
+    fun releaseLocalDisplay(type: Int, surface: Surface) {
+        if (!localDisplayTypes.remove(type)) return
+        clearSurface(type, surface)
+        requestVideoRecovery(type)
+    }
+
+    /** Negotiated video resolution, used to lay out the on-screen preview and map its touch input. */
+    val localDisplayWidth: Int get() = videoWidth
+    val localDisplayHeight: Int get() = videoHeight
+
+    /** Actual decoded frame size (visible, after crop) once the decoder reports its output format. */
+    fun localDisplayIntrinsicSize(type: Int): Pair<Int, Int>? {
+        val decoder = videoDecoders[type] ?: return null
+        val w = decoder.outputWidth
+        val h = decoder.outputHeight
+        return if (w > 0 && h > 0) w to h else null
+    }
+
     fun setScreenStreamActiveChangedListener(listener: ((Int, Boolean) -> Unit)?) {
         synchronized(screenStateLock) {
             screenStreamActiveChanged = listener
@@ -176,6 +213,18 @@ class AndroidMediaSink(
         onVideoFrame(type, HeapVideoFrame(naluBytes), presentationTimeUs, receivedAtNs, decryptNs)
 
     override fun onVideoFrame(type: Int, frame: CompressedVideoFrame, presentationTimeUs: Long, receivedAtNs: Long, decryptNs: Long) {
+        // When this screen is shown on the phone the phone owns its frames and the browser push is
+        // skipped entirely, so only one pipeline runs at a time.
+        if (type in localDisplayTypes) {
+            if (type in suspendedVideo) {
+                if (!frame.isRandomAccess(pendingVideoCodec[type] ?: VideoCodec.H264)) return
+                val config = videoConfigs[type] ?: return
+                videoDecoder(type).configure(pendingVideoCodec[type] ?: VideoCodec.H264, config)
+                suspendedVideo.remove(type)
+            }
+            videoDecoder(type).submit(frame.toByteArray())
+            return
+        }
         if (encodedVideo?.frame(type, frame, presentationTimeUs, receivedAtNs, decryptNs) == true) {
             if (suspendedVideo.add(type)) videoDecoders.remove(type)?.close()
             return
@@ -331,6 +380,12 @@ private class VideoDecoder(
     private var duplicateConfigLogged = false
     private val referenceChain = VideoReferenceChain()
     private var lastKeyFrameRequestNs = 0L
+    // Visible decoded frame size (after crop) from the output format; the browser and the phone
+    // preview must fit to this rather than the requested resolution, which iPhone may clamp.
+    @Volatile var outputWidth = 0
+        private set
+    @Volatile var outputHeight = 0
+        private set
     private val stats = VideoStats()
     private val thread = Thread(::run, "carplay-video").apply { isDaemon = true; start() }
 
@@ -569,6 +624,14 @@ private class VideoDecoder(
     }
 
     private fun logOutputFormat(format: MediaFormat) {
+        val cropLeft = format.intOrNull("crop-left") ?: 0
+        val cropTop = format.intOrNull("crop-top") ?: 0
+        val cropRight = format.intOrNull("crop-right")
+        val cropBottom = format.intOrNull("crop-bottom")
+        val codedWidth = format.intOrNull(MediaFormat.KEY_WIDTH) ?: width
+        val codedHeight = format.intOrNull(MediaFormat.KEY_HEIGHT) ?: height
+        outputWidth = (if (cropRight != null) cropRight - cropLeft + 1 else codedWidth).coerceAtLeast(1)
+        outputHeight = (if (cropBottom != null) cropBottom - cropTop + 1 else codedHeight).coerceAtLeast(1)
         report("output format requested=${width}x${height} " +
             "coded=${format.intOrNull(MediaFormat.KEY_WIDTH)}x${format.intOrNull(MediaFormat.KEY_HEIGHT)} " +
             "crop=${format.intOrNull("crop-left")},${format.intOrNull("crop-top")}," +

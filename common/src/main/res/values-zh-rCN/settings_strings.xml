@@ -37,6 +37,8 @@
     <string name="settings_auto_connect_description">使用上次的连接方式和已选择的 iPhone。</string>
     <string name="settings_auto_start">设备启动后打开</string>
     <string name="settings_auto_start_description">需要系统允许应用自启动。</string>
+    <string name="settings_keep_screen_on">应用界面保持屏幕常亮</string>
+    <string name="settings_keep_screen_on_description">应用显示时阻止系统休眠，避免投屏会话被挂起或杀掉。</string>
     <string name="settings_iphone">iPhone</string>
     <string name="settings_unselected">未选择</string>
     <string name="settings_wireless_connection">无线连接</string>
@@ -58,6 +60,8 @@
     <string name="settings_microphone_description">修改后重新连接。浏览器麦克风需要可信 HTTPS 和授权，未就绪时回退 Android；禁用会停止上传并取消麦克风能力声明。</string>
     <string name="settings_appearance">CarPlay 昼夜模式</string>
     <string name="settings_appearance_description">即时发送给 iPhone；跟随 Android 时使用此服务设备的系统昼夜模式。</string>
+    <string name="settings_default_view">CarPlay 默认显示位置</string>
+    <string name="settings_default_view_description">选择 iPhone 连接后 CarPlay 的去向。选择“手机”会自动打开 App 内显示；选择“浏览器”则串流到车机。</string>
     <string name="settings_display_size">CarPlay 图标与文字大小</string>
     <string name="settings_display_size_description">数值越大，CarPlay 图标和文字越小（以模拟屏幕宽度 mm 表示）；应用后会重新连接。</string>
     <string name="settings_legacy_safe_area">保留已有安全区域</string>
@@ -65,8 +69,8 @@
     <string name="settings_safe_area_value">上 %1$d%% · 下 %2$d%% · 左 %3$d%% · 右 %4$d%%</string>
     <string name="settings_safe_area">画面安全区域</string>
     <string name="settings_safe_area_description">为被车机控件遮挡的边缘设置留白，按画面比例适配分辨率。保存后重新连接，让 iPhone 在安全区域内布局；触控坐标仍覆盖完整画面。</string>
-    <string name="settings_adaptive_size">自适应浏览器尺寸</string>
-    <string name="settings_adaptive_size_description">按车机浏览器的实际画面比例协商 CarPlay 分辨率；浏览器尺寸变化时会重新连接。</string>
+    <string name="settings_adaptive_size">自适应屏幕尺寸</string>
+    <string name="settings_adaptive_size_description">依设备屏幕或浏览器的实际画面比例协商 CarPlay 分辨率；尺寸变化时会重新连接。</string>
     <string name="settings_resolution">分辨率</string>
     <string name="settings_original_resolution">原始分辨率</string>
     <string name="settings_resolution_lower" formatted="false">80% · 降低负载</string>

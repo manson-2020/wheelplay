@@ -30,6 +30,13 @@ internal fun ConnectionSettingsScreen(state: SettingsState, actions: SettingsAct
             R.string.settings_auto_start,
             R.string.settings_auto_start_description,
         )
+        SettingsToggle(
+            state,
+            actions,
+            ToggleSetting.KEEP_SCREEN_ON,
+            R.string.settings_keep_screen_on,
+            R.string.settings_keep_screen_on_description,
+        )
         SettingsRow(settingsString(R.string.settings_iphone), state.phoneName, "settings:phone") {
             actions.command(SettingsCommand.SELECT_PHONE)
         }
