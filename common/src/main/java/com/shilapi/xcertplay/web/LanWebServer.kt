@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.web
 
 import android.content.Context
 import android.os.SystemClock
+import android.util.Log
 import com.shilapi.xcertplay.airplay.AirPlayContact
 import com.shilapi.xcertplay.shared.R as UiR
 import fi.iki.elonen.NanoHTTPD
@@ -400,11 +401,24 @@ internal class LanWebServer(
         private var rtcAttempted = false
         private var rtcId = 0L
         private var rtcAnswered = false
+        // Head-unit telemetry placeholder: last live-transition count reported by the browser.
+        private var lastLiveTransitions = -1
 
         private fun reconcileVideo() =
             synchronized(rtcLock) {
                 val source = WebSession.videoSource
                 if (rtcSource !== source || rtcConfig !== source?.config) {
+                    // A genuine iPhone video reconfiguration (new codec parameters) re-arms one
+                    // WebRTC attempt. Log it so the head-unit retry cadence is visible from the
+                    // Android host logcat without a browser console; a repeated cadence here is the
+                    // "flicker every so often" the Tesla browser reports.
+                    if (rtcAttempted) {
+                        Log.i(
+                            "WheelPlayWeb",
+                            "rtc-attempt re-armed t=${SystemClock.elapsedRealtime()} " +
+                                "sourceChanged=${rtcSource !== source} configChanged=${rtcConfig !== source?.config}",
+                        )
+                    }
                     stopRtc()
                     rtcSource = source
                     rtcConfig = source?.config
@@ -436,6 +450,10 @@ internal class LanWebServer(
                 rtcAttempted = true
                 rtcAnswered = false
                 val id = ++rtcId
+                Log.i(
+                    "WheelPlayWeb",
+                    "rtc-attempt start id=$id codec=${config.codec.name} t=${SystemClock.elapsedRealtime()}",
+                )
                 val recovery =
                     com.shilapi.xcertplay.AirPlayPersistence.loadRtcRecoveryPolicy(context)
                 val stream =
@@ -619,6 +637,14 @@ internal class LanWebServer(
                         require(WebSession.reportBrowserViewport(width, height))
                     }
                     "ping" -> {
+                        val transitions = data.optInt("liveTransitions", -1)
+                        if (transitions >= 0 && transitions != lastLiveTransitions) {
+                            Log.i(
+                                "WheelPlayWeb",
+                                "live-transitions t=${SystemClock.elapsedRealtime()} count=$transitions",
+                            )
+                            lastLiveTransitions = transitions
+                        }
                         reconcileVideo()
                         val frame = WebSession.frame
                         synchronized(rtcLock) {

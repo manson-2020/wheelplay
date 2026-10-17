@@ -58,8 +58,8 @@
     <string name="settings_microphone_description">修改後重新連線。瀏覽器麥克風需要可信 HTTPS 和授權，未就緒時回退 Android；禁用會停止上傳並取消麥克風能力宣告。</string>
     <string name="settings_appearance">CarPlay 晝夜模式</string>
     <string name="settings_appearance_description">即時傳送給 iPhone；跟隨 Android 時使用此服務裝置的系統晝夜模式。</string>
-    <string name="settings_display_size">CarPlay 顯示尺寸</string>
-    <string name="settings_display_size_description">調整 CarPlay 圖示和文字大小，套用後會重新連線。</string>
+    <string name="settings_display_size">CarPlay 圖示與文字大小</string>
+    <string name="settings_display_size_description">數值越大，CarPlay 圖示和文字越小（以模擬螢幕寬度 mm 表示）；套用後會重新連線。</string>
     <string name="settings_legacy_safe_area">保留已有安全區域</string>
     <string name="settings_fullscreen">全螢幕</string>
     <string name="settings_safe_area_value">上 %1$d%% · 下 %2$d%% · 左 %3$d%% · 右 %4$d%%</string>

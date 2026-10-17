@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import com.shilapi.xcertplay.AirPlayPersistence
 import com.shilapi.xcertplay.BrowserOfflinePolicy
 import com.shilapi.xcertplay.CarPlayAppearance
@@ -629,12 +630,21 @@ internal object WebSession {
         if (
             width !in MIN_VIEWPORT_PIXELS..MAX_VIEWPORT_PIXELS ||
                 height !in MIN_VIEWPORT_PIXELS..MAX_VIEWPORT_PIXELS
-        )
+        ) {
+            Log.i("WheelPlayWeb", "viewport rejected t=${SystemClock.elapsedRealtime()} ${width}x$height out-of-range")
             return false
+        }
         val ratio = width.toDouble() / height
-        if (ratio !in MIN_VIEWPORT_ASPECT..MAX_VIEWPORT_ASPECT) return false
+        if (ratio !in MIN_VIEWPORT_ASPECT..MAX_VIEWPORT_ASPECT) {
+            Log.i("WheelPlayWeb", "viewport rejected t=${SystemClock.elapsedRealtime()} ${width}x$height ratio=$ratio")
+            return false
+        }
         val size = width to height
         browserViewport = size
+        Log.i(
+            "WheelPlayWeb",
+            "viewport accepted t=${SystemClock.elapsedRealtime()} ${width}x$height ratio=$ratio adaptive=$adaptiveBrowserSize",
+        )
         if (adaptiveBrowserSize) browserViewportListener?.invoke(width, height)
         return true
     }

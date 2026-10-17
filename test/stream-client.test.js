@@ -338,3 +338,37 @@ test('revocation during an active display stops retries and requires fresh pairi
   assert.equal(f.element('code-entry').hidden, false);
   assert.equal(f.preferences.has('wheelplay.browserDevice'), false);
 });
+
+test('a transient streaming dropout within the stability window never reveals the waiting overlay', async () => {
+  const f = fixture(), ws = await f.connect(); f.frame(ws);
+  assert.equal(f.element('waiting').hidden, true);
+  // A single heartbeat that momentarily reports no streaming must not flicker the transparent overlay.
+  ws.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: false }) });
+  assert.equal(f.element('waiting').hidden, true, 'overlay stays hidden while the dropout is within the grace window');
+  assert.ok([...f.timers.values()].some(t => t.delay === 800), 'a stability timer is armed');
+  // Streaming returns before the grace window elapses, so the pending reveal is cancelled.
+  ws.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true }) });
+  assert.equal(f.element('waiting').hidden, true);
+  assert.equal([...f.timers.values()].some(t => t.delay === 800), false, 'the pending reveal is cancelled on recovery');
+});
+
+test('a sustained streaming dropout reveals the waiting overlay only after the stability window', async () => {
+  const f = fixture(), ws = await f.connect(); f.frame(ws);
+  ws.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: false }) });
+  assert.equal(f.element('waiting').hidden, true, 'the overlay is not shown immediately');
+  [...f.timers.values()].find(t => t.delay === 800).fn();
+  assert.equal(f.element('waiting').hidden, false, 'a persistent dropout eventually shows the overlay');
+});
+
+test('a WebRTC retry that falls back over a live JPEG stream never flickers the waiting overlay', async () => {
+  const f = fixture(), ws = await f.connect(); f.frame(ws);
+  assert.equal(f.element('waiting').hidden, true);
+  // Server advertises WebRTC availability; the client requests an attempt.
+  ws.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true, rtcAvailable: true }) });
+  assert.ok(ws.sent.some(m => m.type === 'rtc-start'), 'the client starts WebRTC when it becomes available');
+  await f.offer(ws); // peer connects and the video path becomes active
+  // A decoder error forces fallback: onStop runs setLive(Boolean(lastFrame && screen.naturalWidth)).
+  f.element('video').onerror();
+  assert.ok(ws.sent.some(m => m.type === 'rtc-fallback'), 'the client reports the fallback');
+  assert.equal(f.element('waiting').hidden, true, 'the overlay stays hidden because the JPEG stream kept the picture live');
+});

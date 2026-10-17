@@ -2685,15 +2685,23 @@ class CarPlayHostActivity : ComponentActivity() {
         return activeDisplaySize
     }
 
-    private fun resolvePhysicalSize(size: DisplaySize): AirPlayPhysicalSizeMm =
-        AirPlayDisplaySettings.resolvePhysicalSizeMm(
+    private fun resolvePhysicalSize(size: DisplaySize): AirPlayPhysicalSizeMm {
+        // When the browser viewport is authoritative (adaptive browser size on), the negotiated
+        // canvas IS the real target display. Normalizing physical mm against the per-phone,
+        // cross-device maximumDetected history makes two Android hosts report different mm for the
+        // same car browser, so iPhone selects a different CarPlay UI scale and the picture fills
+        // the screen at a different proportion. Use the current display as its own basis (ratio 1)
+        // so the configured widthPhysicalMm is reported verbatim, independent of connection history.
+        val authoritative = WebSession.adaptiveBrowserSize
+        return AirPlayDisplaySettings.resolvePhysicalSizeMm(
             currentWidthPixels = size.width,
             currentHeightPixels = size.height,
-            maximumWidthPixels = maxOf(maximumDetectedWidthPixels, size.width),
-            maximumHeightPixels = maxOf(maximumDetectedHeightPixels, size.height),
+            maximumWidthPixels = if (authoritative) size.width else maxOf(maximumDetectedWidthPixels, size.width),
+            maximumHeightPixels = if (authoritative) size.height else maxOf(maximumDetectedHeightPixels, size.height),
             referenceMillimeters = widthPhysicalMm,
             basis = physicalSizeBasis,
         )
+    }
 
     private fun safeAreaSummary(): String {
         val size = currentActivitySize() ?: return getString(UiR.string.host_safe_area_waiting_for_activity_size)
@@ -3042,6 +3050,7 @@ class CarPlayHostActivity : ComponentActivity() {
         val browserSize = WebSession.currentBrowserViewport.takeIf { WebSession.adaptiveBrowserSize }
         val size = browserSize?.let { DisplaySize(it.first, it.second) } ?: DEFAULT_BROWSER_DISPLAY
         if (size == activeDisplaySize || size == pendingDisplaySize) return
+        appendLog("Display size scheduled: ${size.width}x${size.height} source=${if (browserSize != null) "browser" else "DEFAULT"}")
         pendingDisplaySize = size
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.postDelayed(applyDisplaySize, DISPLAY_CHANGE_DEBOUNCE_MILLIS)
@@ -3049,6 +3058,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun scheduleBrowserDisplaySize(width: Int?, height: Int?) {
         if (shuttingDown.get()) return
+        val source = if (width == null || height == null) "DEFAULT" else "browser"
         val size = if (width == null || height == null) {
             DEFAULT_BROWSER_DISPLAY
         } else {
@@ -3063,7 +3073,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 kotlin.math.abs(size.width.toDouble() / size.height - active.width.toDouble() / active.height) < 0.01
             ) return
         }
-        appendLog("Adaptive browser display requested: ${size.width}x${size.height}")
+        appendLog("Adaptive browser display requested: ${size.width}x${size.height} source=$source")
         pendingDisplaySize = size
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.postDelayed(applyDisplaySize, BROWSER_DISPLAY_CHANGE_DEBOUNCE_MILLIS)

@@ -58,8 +58,8 @@
     <string name="settings_microphone_description">Reconnects after changes. The browser microphone requires trusted HTTPS and permission; Android is used until it is ready. Disabling stops uploads and removes the microphone capability.</string>
     <string name="settings_appearance">CarPlay day/night mode</string>
     <string name="settings_appearance_description">Sent to the iPhone immediately. Follow Android uses this service device\'s system day/night mode.</string>
-    <string name="settings_display_size">CarPlay display size</string>
-    <string name="settings_display_size_description">Adjust the size of CarPlay icons and text. Applying reconnects the iPhone.</string>
+    <string name="settings_display_size">CarPlay icon and text size</string>
+    <string name="settings_display_size_description">A larger value makes CarPlay icons and text smaller (reported as a simulated screen width in mm). Applying reconnects the iPhone.</string>
     <string name="settings_legacy_safe_area">Keep existing safe area</string>
     <string name="settings_fullscreen">Full screen</string>
     <string name="settings_safe_area_value">Top %1$d%% · Bottom %2$d%% · Left %3$d%% · Right %4$d%%</string>

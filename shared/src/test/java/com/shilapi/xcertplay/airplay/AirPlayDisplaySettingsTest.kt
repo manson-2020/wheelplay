@@ -48,4 +48,31 @@ class AirPlayDisplaySettingsTest {
         assertEquals(250, size.widthMm)
         assertEquals(141, size.heightMm)
     }
+
+    @Test
+    fun authoritativeViewportReportsConfiguredWidthIndependentOfCrossDeviceHistory() {
+        // Adaptive browser size on: the caller passes the current display as its own maximum, so the
+        // configured physical width is reported verbatim for every Android host.
+        val authoritative = AirPlayDisplaySettings.resolvePhysicalSizeMm(
+            currentWidthPixels = 1918,
+            currentHeightPixels = 1200,
+            maximumWidthPixels = 1918,
+            maximumHeightPixels = 1200,
+            referenceMillimeters = 300,
+            basis = AirPlayPhysicalSizeBasis.WIDTH,
+        )
+        assertEquals(300, authoritative.widthMm)
+
+        // A polluted per-phone history (e.g. a previously paired 2560-wide PC browser) would shrink
+        // the reported width and make iPhone choose a different UI scale on another host.
+        val polluted = AirPlayDisplaySettings.resolvePhysicalSizeMm(
+            currentWidthPixels = 1918,
+            currentHeightPixels = 1200,
+            maximumWidthPixels = 2560,
+            maximumHeightPixels = 1440,
+            referenceMillimeters = 300,
+            basis = AirPlayPhysicalSizeBasis.WIDTH,
+        )
+        assertEquals(225, polluted.widthMm)
+    }
 }

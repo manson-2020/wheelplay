@@ -331,6 +331,15 @@ if (typeof document !== 'undefined') {
   let rtc = null, rtcRequested = false, rtcFps = null;
   let socket = null, stopped = true, paired = false, retry = null, attempts = 0;
   let width = 1280, height = 720, live = false, objectUrl = null, lastFrame = 0, lastStatus = 0;
+  // `live` is the instantaneous target; `displayedLive` is what the DOM currently reflects. A
+  // transient dropout (Tesla head-unit browser timing) must not flicker the transparent #waiting
+  // overlay or the .stale dimming, so going not-live is deferred by a stability window while
+  // recovering to live is applied immediately.
+  let displayedLive = false, liveDropTimer = null;
+  const LIVE_STABLE_MS = 800;
+  // Head-unit telemetry placeholder: counts live-target transitions so the flicker cadence can be
+  // observed server-side (piggybacked on the existing ping, never a new protocol type).
+  let liveTransitionCount = 0;
   let heartbeat = null, movePending = false, moveGeneration = 0, outbox = null;
   let authGeneration = 0, deviceCredential = null, storageAvailable = false;
   let launchPresentation = null;
@@ -542,6 +551,11 @@ if (typeof document !== 'undefined') {
       const signature = `${width}x${height}`;
       if (signature === lastViewportSignature) return;
       lastViewportSignature = signature;
+      // Aspect-ratio diagnostics: the negotiated canvas follows this report, so log the exact
+      // inputs (rect, devicePixelRatio, rounded size) that decide the CarPlay proportion.
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('wheelplay viewport', signature, 'rect=' + Math.round(rect.width) + 'x' + Math.round(rect.height), 'dpr=' + scale);
+      }
       send({ type: 'viewport', width, height });
     }, 180);
   }
@@ -550,14 +564,30 @@ if (typeof document !== 'undefined') {
   function cancelMove() { moveGeneration++; movePending = false; }
   function contacts() { return [...pointers.values()].map(p => ({ id: p.id, x: p.x, y: p.y, down: true })); }
   function release() { cancelMove(); pointers.clear(); send({ type: 'touch', contacts: [] }); }
+  function applyDisplayed(displayed) {
+    displayedLive = displayed;
+    screen.classList.toggle('stale', !displayed);
+    video.classList.toggle('stale', !displayed);
+    canvas.classList.toggle('stale', !displayed);
+    touchSurface.classList.toggle('stale', !displayed);
+    $('waiting').hidden = displayed;
+    if (!displayed && pointers.size) release();
+  }
+  function cancelLiveDrop() {
+    if (liveDropTimer !== null) { clearTimeout(liveDropTimer); liveDropTimer = null; }
+  }
   function setLive(value) {
+    if (value !== live) liveTransitionCount++;
     live = value;
-    screen.classList.toggle('stale', !value);
-    video.classList.toggle('stale', !value);
-    canvas.classList.toggle('stale', !value);
-    touchSurface.classList.toggle('stale', !value);
-    $('waiting').hidden = value;
-    if (!value && pointers.size) release();
+    if (value) {
+      cancelLiveDrop();
+      if (!displayedLive) applyDisplayed(true);
+    } else if (displayedLive && liveDropTimer === null) {
+      liveDropTimer = setTimeout(() => {
+        liveDropTimer = null;
+        if (!live) applyDisplayed(false);
+      }, LIVE_STABLE_MS);
+    }
   }
   function cleanupImage() {
     screen.onload = null; screen.onerror = null; screen.removeAttribute('src');
@@ -600,7 +630,7 @@ if (typeof document !== 'undefined') {
     if (outbox) { outbox.close(); outbox = null; }
     clearTimeout(retry); clearInterval(heartbeat);
     if (socket) { const old = socket; socket = null; old.close(); }
-    cleanupRtc(); cleanupImage(); setLive(false);
+    cleanupRtc(); cleanupImage(); cancelLiveDrop(); live = false; applyDisplayed(false);
     browserAudio.close(); $('audio-message').hidden = true;
     $('topbar').hidden = false; $('pairing').hidden = false; $('display').hidden = true;
     $('disconnect').hidden = true; $('connect').disabled = false;
@@ -652,11 +682,11 @@ if (typeof document !== 'undefined') {
       lastViewportSignature = '';
       scheduleViewportReport();
       $('status').textContent = t("web_connected_waiting_for_video");
-      send({ type: 'ping' });
+      send({ type: 'ping', liveTransitions: liveTransitionCount });
       clearInterval(heartbeat);
       heartbeat = setInterval(() => {
         if (Date.now() - lastStatus > 6000) { ws.close(); return; }
-        send({ type: 'ping' });
+        send({ type: 'ping', liveTransitions: liveTransitionCount });
         if (pointers.size) send({ type: 'touch', contacts: contacts() }, 'move');
       }, 400);
     };
