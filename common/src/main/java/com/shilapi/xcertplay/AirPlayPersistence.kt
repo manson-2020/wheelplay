@@ -72,6 +72,8 @@ object AirPlayPersistence {
     private const val KEY_DEFAULT_VIEW = "carplay_default_view"
     private const val KEY_DEFAULT_DISPLAY_WIDTH = "carplay_default_display_width"
     private const val KEY_DEFAULT_DISPLAY_HEIGHT = "carplay_default_display_height"
+    private const val KEY_DEFAULT_DISPLAY_PX_WIDTH = "carplay_default_display_px_width"
+    private const val KEY_DEFAULT_DISPLAY_PX_HEIGHT = "carplay_default_display_px_height"
     private const val KEY_BROWSER_OFFLINE = "browser_offline_policy"
     private const val KEY_SAFE_MARGINS = "carplay_safe_margins"
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
@@ -88,10 +90,11 @@ object AirPlayPersistence {
     const val DEFAULT_SIMULATED_MANUFACTURER_NAME = "Tesla"
     const val DEFAULT_MFI_I2C_PATH = "/dev/i2c-1"
 
-    // The native 15.4" Tesla touchscreen resolution, kept as the browser-view default canvas so iOS
-    // stays on a 1x scale for a dense dashboard.
-    const val BROWSER_DEFAULT_DISPLAY_WIDTH = 1920
-    const val BROWSER_DEFAULT_DISPLAY_HEIGHT = 1200
+    // The Tesla browser's measured viewport (773x601 CSS px at dpr 1.53, rounded to even physical
+    // pixels), kept as the browser-view default canvas so the picture is 1:1 with what the head unit
+    // actually shows and the adaptive report lands inside the renegotiation tolerance.
+    const val BROWSER_DEFAULT_DISPLAY_WIDTH = 1182
+    const val BROWSER_DEFAULT_DISPLAY_HEIGHT = 920
 
     fun loadBrowserAudioPlayback(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_BROWSER_AUDIO_PLAYBACK, false)
@@ -133,10 +136,11 @@ object AirPlayPersistence {
     }
 
     /**
-     * The canvas recorded when the default view is chosen: 1920x1200 for the head-unit browser, or
-     * the phone's own size for the on-phone display. Null until the user first saves the option, in
-     * which case callers fall back to the native browser default. It is read on the next launch so
-     * the auto-connect session starts already at the right size and never renegotiates on preview.
+     * The canvas recorded when the default view is chosen: the measured browser viewport canvas
+     * (BROWSER_DEFAULT_DISPLAY_*) for the head-unit browser, or the phone's own size for the on-phone
+     * display. Null until the user first saves the option, in which case callers fall back to the
+     * native browser default. It is read on the next launch so the auto-connect session starts
+     * already at the right size and never renegotiates on preview.
      */
     fun loadDefaultDisplaySize(context: Context): Pair<Int, Int>? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -148,6 +152,26 @@ object AirPlayPersistence {
     fun saveDefaultDisplaySize(context: Context, width: Int, height: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_DEFAULT_DISPLAY_WIDTH, width).putInt(KEY_DEFAULT_DISPLAY_HEIGHT, height).apply()
+    }
+
+    /**
+     * The physical-pixel twin of the recorded on-phone canvas (same proportion, dp * density capped to
+     * 3840x2160), saved alongside the dp size only when the default view is the phone display and
+     * cleared for the browser view. The host negotiates the session at this size from the first
+     * handshake, so the on-phone picture is 1:1 sharp and entering the preview never reconnects; a
+     * browser-view record has none, leaving the head-unit canvas exactly as before.
+     */
+    fun loadDefaultDisplayPxSize(context: Context): Pair<Int, Int>? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val width = prefs.getInt(KEY_DEFAULT_DISPLAY_PX_WIDTH, 0)
+        val height = prefs.getInt(KEY_DEFAULT_DISPLAY_PX_HEIGHT, 0)
+        return if (width > 0 && height > 0) width to height else null
+    }
+
+    fun saveDefaultDisplayPxSize(context: Context, width: Int?, height: Int?) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_DEFAULT_DISPLAY_PX_WIDTH, width ?: 0)
+            .putInt(KEY_DEFAULT_DISPLAY_PX_HEIGHT, height ?: 0).apply()
     }
     fun loadBrowserOfflinePolicy(context: Context): BrowserOfflinePolicy = BrowserOfflinePolicy.entries.firstOrNull {
         it.name == context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_BROWSER_OFFLINE, null)

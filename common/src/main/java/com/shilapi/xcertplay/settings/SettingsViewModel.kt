@@ -122,7 +122,9 @@ internal class SettingsViewModel(
             margins = AirPlayPersistence.loadSafeMargins(app),
             displayWidthMm = AirPlayPersistence.loadWidthPhysicalMm(app),
             legacySafeArea =
-                (WebSession.currentBrowserViewport ?: (1920 to 1200)).let { (w, h) ->
+                (WebSession.currentBrowserViewport ?: (
+                    AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_WIDTH to AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_HEIGHT
+                )).let { (w, h) ->
                     AirPlayPersistence.loadSafeAreaRect(app, w, h) != null
                 },
             ssid = AirPlayPersistence.loadManualHotspotSsid(app),
@@ -149,15 +151,21 @@ internal class SettingsViewModel(
                     val view = CarPlayDefaultView.entries[index]
                     AirPlayPersistence.saveDefaultView(app, view)
                     // Record the canvas this view wants so the next auto-connect starts at the right
-                    // size: the phone's own dp size on-phone, or the native 1920x1200 for the browser.
+                    // size: the phone's own dp size on-phone, or the measured browser viewport for the browser.
+                    val phoneDp = if (view == CarPlayDefaultView.PHONE_DISPLAY) CarPlayPhoneDisplay.landscapeDp(app) else null
                     val size =
-                        if (view == CarPlayDefaultView.PHONE_DISPLAY) CarPlayPhoneDisplay.landscapeDp(app)
-                        else AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_WIDTH to AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_HEIGHT
+                        phoneDp ?: AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_WIDTH to AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_HEIGHT
                     AirPlayPersistence.saveDefaultDisplaySize(
                         app,
                         size?.first ?: AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_WIDTH,
                         size?.second ?: AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_HEIGHT,
                     )
+                    // The phone view also records the physical-pixel twin (same proportion, larger
+                    // canvas) so the on-phone preview can negotiate 1:1 instead of a density upscale.
+                    val phonePx = phoneDp?.let {
+                        CarPlayPhoneDisplay.landscapePx(it.first, it.second, app.resources.displayMetrics.density)
+                    }
+                    AirPlayPersistence.saveDefaultDisplayPxSize(app, phonePx?.first, phonePx?.second)
                     SettingsEffect.None
                 }
                 ChoiceSetting.RESOLUTION -> {

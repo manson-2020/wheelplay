@@ -167,8 +167,8 @@ class OffscreenVideoOutput(
             pixels.rewind()
             val frame = bitmap ?: return
             frame.copyPixelsFromBuffer(pixels)
-            val bytes = ByteArrayOutputStream(width * height / 6)
-            frame.compress(Bitmap.CompressFormat.JPEG, 75, bytes)
+            val bytes = ByteArrayOutputStream(width * height / 4)
+            frame.compress(Bitmap.CompressFormat.JPEG, 90, bytes)
             publish(bytes.toByteArray())
         } catch (error: Exception) {
             Log.e("WheelPlay", "Offscreen frame failed", error)

@@ -46,6 +46,11 @@ enum class CarPlayDefaultView(@param:androidx.annotation.StringRes val labelRes:
  * Returns null when the dp size is outside the CarPlay canvas limits.
  */
 object CarPlayPhoneDisplay {
+    // The largest canvas CarPlay negotiates today (scheduleBrowserDisplaySize caps a reported browser
+    // viewport to the same box), so a phone-derived canvas can never exceed what the pipeline accepts.
+    private const val MAX_CANVAS_WIDTH = 3840
+    private const val MAX_CANVAS_HEIGHT = 2160
+
     fun landscapeDp(context: Context): Pair<Int, Int>? {
         val density = context.resources.displayMetrics.density.takeIf { it >= 1f } ?: 1f
         val panel = fullPanelPx(context)
@@ -56,7 +61,52 @@ object CarPlayPhoneDisplay {
         return longEdge to shortEdge
     }
 
-    private fun even(value: Float): Int = (value.roundToInt().coerceAtLeast(2) / 2) * 2
+    /** The phone panel in physical pixels: the dp canvas scaled back by density, so dp→px only changes size, never proportion. */
+    fun landscapePx(context: Context): Pair<Int, Int>? =
+        landscapeDp(context)?.let { landscapePx(it.first, it.second, context.resources.displayMetrics.density) }
+
+    /**
+     * Expands a recorded dp canvas to physical pixels (dp * density, even, capped to the 3840x2160
+     * maximum the negotiation pipeline accepts). Used for the on-phone display, where the canvas
+     * should match the panel 1:1 instead of being upscaled by density. Null when the result leaves
+     * the CarPlay canvas limits.
+     */
+    fun landscapePx(dpWidth: Int, dpHeight: Int, density: Float): Pair<Int, Int>? {
+        if (dpWidth <= 0 || dpHeight <= 0) return null
+        val scale = density.takeIf { it >= 1f } ?: 1f
+        var longEdge = (maxOf(dpWidth, dpHeight) * scale).toDouble()
+        var shortEdge = (minOf(dpWidth, dpHeight) * scale).toDouble()
+        val fit = minOf(1.0, MAX_CANVAS_WIDTH / longEdge, MAX_CANVAS_HEIGHT / shortEdge)
+        longEdge *= fit
+        shortEdge *= fit
+        val longPx = even(longEdge)
+        val shortPx = even(shortEdge)
+        if (longPx < 320 || shortPx < 320) return null
+        return longPx to shortPx
+    }
+
+    private fun even(value: Float): Int = even(value.toDouble())
+
+    private fun even(value: Double): Int = (value.roundToInt().coerceAtLeast(2) / 2) * 2
+
+    /**
+     * The canvas a default (no reported browser viewport) negotiation starts at. The physical-pixel
+     * twin applies only while the picture is meant for the phone: either no head-unit browser viewer
+     * is watching, or the local preview already owns the canvas. With a watching browser the recorded
+     * dp size is kept, so the web stream gets exactly the canvas it used before the 1:1 expansion -
+     * the px twin must never leak into a browser session. A null recorded pair leaves the caller's
+     * own browser default (returned as null here).
+     */
+    fun selectDefaultDisplayPair(
+        recorded: Pair<Int, Int>?,
+        pxTwin: Pair<Int, Int>?,
+        hasBrowserViewer: Boolean,
+        localDisplayActive: Boolean,
+    ): Pair<Int, Int>? {
+        if (recorded == null) return null
+        if (hasBrowserViewer && !localDisplayActive) return recorded
+        return pxTwin ?: recorded
+    }
 
     @Suppress("DEPRECATION")
     private fun fullPanelPx(context: Context): Point {

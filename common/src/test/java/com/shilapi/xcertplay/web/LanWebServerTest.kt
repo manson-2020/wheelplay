@@ -84,6 +84,10 @@ class LanWebServerTest {
         WebSession.start(org.robolectric.RuntimeEnvironment.getApplication())
         try {
             for (host in listOf("100.96.0.1:8080", "car.example.com:8080")) {
+                // The server releases the previous viewer asynchronously on its reader thread once the
+                // socket closes; wait for that slot to free up so this iteration's handshake is not
+                // answered with a "busy" frame instead of the expected "audio-route".
+                awaitViewerReleased()
                 handshake("000000", "http://$host", host = host).use {
                     assertTrue(readHeaders(it).startsWith("HTTP/1.1 401"))
                 }
@@ -521,6 +525,11 @@ class LanWebServerTest {
     }
     private fun frame(socket: Socket): ByteArray {
         return fi.iki.elonen.NanoWSD.WebSocketFrame.read(socket.getInputStream()).binaryPayload
+    }
+    private fun awaitViewerReleased() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+        while (WebSession.hasViewer && System.nanoTime() < deadline) Thread.sleep(10)
+        assertFalse("Previous viewer was not released before the next handshake", WebSession.hasViewer)
     }
     private fun text(socket: Socket, message: String) {
         maskedFrame(socket, 1, message.toByteArray())

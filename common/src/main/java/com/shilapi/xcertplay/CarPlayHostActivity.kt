@@ -3047,13 +3047,32 @@ class CarPlayHostActivity : ComponentActivity() {
 
     /**
      * The canvas to negotiate when no head-unit browser viewport is in play: the size recorded when
-     * the default view was chosen (the phone's own dp size on-phone, or 1920x1200 for the browser),
+     * the default view was chosen (the phone's own canvas on-phone, or the measured browser viewport
+     * for the browser),
      * falling back to the native browser default until that option is first saved. Reading it here and
      * in the preview keeps both on the same number, so opening the on-phone display never reconnects.
+     * The physical-pixel twin is only applied while the picture is meant for the phone - no head-unit
+     * browser is watching, or the local preview owns the canvas - so the first on-phone picture is
+     * already 1:1 sharp. A watching browser keeps the recorded dp canvas, exactly as before the
+     * expansion, because feeding the head unit a phone-sized picture only blurs it through the
+     * bitrate dilution and the mismatched aspect; an older record without a stored px twin derives it
+     * from the dp size and the current density, and the browser view stores no twin at all.
      */
-    private fun defaultDisplaySize(): DisplaySize =
-        AirPlayPersistence.loadDefaultDisplaySize(this)?.let { (width, height) -> DisplaySize(width, height) }
-            ?: DEFAULT_BROWSER_DISPLAY
+    private fun defaultDisplaySize(): DisplaySize {
+        val recorded = AirPlayPersistence.loadDefaultDisplaySize(this)
+        val pxTwin = AirPlayPersistence.loadDefaultDisplayPxSize(this)
+            ?: recorded?.let { (dpWidth, dpHeight) ->
+                CarPlayPhoneDisplay.landscapePx(dpWidth, dpHeight, resources.displayMetrics.density)
+                    ?.takeIf { AirPlayPersistence.loadDefaultView(this) == CarPlayDefaultView.PHONE_DISPLAY }
+            }
+        val size = CarPlayPhoneDisplay.selectDefaultDisplayPair(
+            recorded,
+            pxTwin,
+            WebSession.hasViewer,
+            WebSession.localDisplayActive,
+        )
+        return size?.let { DisplaySize(it.first, it.second) } ?: DEFAULT_BROWSER_DISPLAY
+    }
 
     private fun scheduleDisplaySize(width: Int, height: Int) {
         if (width <= 0 || height <= 0 || shuttingDown.get()) return
@@ -3527,9 +3546,13 @@ class CarPlayHostActivity : ComponentActivity() {
         const val THREE_FINGER_SWIPE_DISTANCE_DP = 72
         const val THREE_FINGER_SWIPE_DIRECTION_RATIO = 1.15f
         const val MAX_SETTINGS_MENU_WIDTH_PX = 1200
-        // Fallback before the browser reports a viewport: the native 1920x1200 of the
-        // Tesla 15.4" touchscreen, keeping iOS on a 1x scale for a dense dashboard.
-        val DEFAULT_BROWSER_DISPLAY = DisplaySize(1920, 1200)
+        // Fallback before the browser reports a viewport: the measured Tesla browser viewport
+        // (773x601 CSS px at dpr 1.53, even physical pixels), so the default canvas is 1:1 with what
+        // the head unit shows and the adaptive report stays inside the renegotiation tolerance.
+        val DEFAULT_BROWSER_DISPLAY = DisplaySize(
+            AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_WIDTH,
+            AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_HEIGHT,
+        )
         val MENU_BACKGROUND = Color.rgb(12, 16, 19)
         val MENU_SECONDARY = Color.rgb(170, 180, 190)
         val MENU_ACCENT = Color.rgb(127, 205, 154)

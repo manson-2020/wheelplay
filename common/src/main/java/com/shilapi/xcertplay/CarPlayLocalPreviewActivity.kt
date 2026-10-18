@@ -193,11 +193,14 @@ class CarPlayLocalPreviewActivity : ComponentActivity() {
     }
 
     private fun startLocalDisplayFromSize() {
-        // The preview always asks for the phone's own dp size. In on-phone view the host already
-        // negotiated that same size, so entering changes nothing; in browser+adaptive view the session
-        // sits at the head-unit viewport, so this correctly reconnects to render on the phone. Falls
-        // back to the live view box only when the dp size is unusable.
-        val phone = CarPlayPhoneDisplay.landscapeDp(this)
+        // The preview always asks for the phone's own physical-pixel canvas: the recorded dp size
+        // scaled by density (same proportion, capped to 3840x2160), so the panel renders 1:1 instead
+        // of a density upscale. The host's default-display fallback applies the identical expansion
+        // while localDisplayActive, so in on-phone view entering still changes nothing; in
+        // browser+adaptive view the session sits at the head-unit viewport, so this correctly
+        // reconnects to render on the phone. Falls back to the live view box only when the px size
+        // is unusable.
+        val phone = CarPlayPhoneDisplay.landscapePx(this)
         if (phone != null) {
             WebSession.beginLocalDisplay(phone.first, phone.second)
             return

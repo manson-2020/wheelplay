@@ -91,11 +91,18 @@ class SettingsViewModelTest {
         val model = SettingsViewModel(app, SavedStateHandle())
         model.choose(ChoiceSetting.DEFAULT_VIEW, CarPlayDefaultView.PHONE_DISPLAY.ordinal)
         assertEquals(CarPlayPhoneDisplay.landscapeDp(app), AirPlayPersistence.loadDefaultDisplaySize(app))
+        // The phone view also records the physical-pixel twin the on-phone preview negotiates.
+        assertEquals(
+            CarPlayPhoneDisplay.landscapePx(app),
+            AirPlayPersistence.loadDefaultDisplayPxSize(app),
+        )
         model.choose(ChoiceSetting.DEFAULT_VIEW, CarPlayDefaultView.BROWSER_STREAM.ordinal)
         assertEquals(
             AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_WIDTH to AirPlayPersistence.BROWSER_DEFAULT_DISPLAY_HEIGHT,
             AirPlayPersistence.loadDefaultDisplaySize(app),
         )
+        // The browser view keeps no px twin, so the browser path never sees a phone-sized canvas.
+        assertNull(AirPlayPersistence.loadDefaultDisplayPxSize(app))
     }
 
     @Test
