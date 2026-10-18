@@ -278,6 +278,7 @@ internal fun SettingsTextDialog(
     // Passwords stay in memory and are never written into saved-instance-state.
     var value by remember(title) { mutableStateOf(initial) }
     var error by remember { mutableStateOf<String?>(null) }
+    var revealed by remember(title) { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -299,7 +300,23 @@ internal fun SettingsTextDialog(
                             else if (numeric) KeyboardType.Number else KeyboardType.Text
                     ),
                 visualTransformation =
-                    if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+                    if (secret && !revealed) PasswordVisualTransformation()
+                    else VisualTransformation.None,
+                trailingIcon = {
+                    if (secret)
+                        IconButton(
+                            onClick = { revealed = !revealed },
+                            modifier = Modifier.testTag("settings:password-visibility"),
+                        ) {
+                            Icon(
+                                painterResource(
+                                    if (revealed) R.drawable.ic_settings_password_hidden
+                                    else R.drawable.ic_settings_password_visible
+                                ),
+                                null,
+                            )
+                        }
+                },
             )
         },
         confirmButton = {
