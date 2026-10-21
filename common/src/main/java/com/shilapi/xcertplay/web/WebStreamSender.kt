@@ -26,6 +26,7 @@ internal class WebStreamSender(
     private data class ImageId(val session: Long, val epoch: Long, val sequence: Long)
     private data class ImageFlight(val at: Long, val bytes: Int)
     private val imagesInFlight = linkedMapOf<ImageId, ImageFlight>()
+    private val imageSentAt = java.util.ArrayDeque<Long>()
     private var singleFrameUntil = 0L
     private var lastImageAckMs = 0L
     private var sequence = -1L
@@ -102,7 +103,13 @@ internal class WebStreamSender(
     fun imageSnapshot(): Map<String, Any> = synchronized(lock) {
         mapOf("protocol" to imageProtocol, "inFlight" to imagesInFlight.size,
             "inFlightBytes" to imagesInFlight.values.sumOf { it.bytes },
-            "window" to imageWindow(), "lastAckMs" to lastImageAckMs)
+            "window" to imageWindow(), "lastAckMs" to lastImageAckMs, "sentFps" to sentFps())
+    }
+
+    private fun sentFps(): Int {
+        val at = now()
+        while (imageSentAt.isNotEmpty() && at - imageSentAt.first() >= 1000) imageSentAt.removeFirst()
+        return imageSentAt.size
     }
 
     private fun imageWindow(): Int = if (imageProtocol != 3 || now() < singleFrameUntil ||
@@ -162,6 +169,8 @@ internal class WebStreamSender(
                         }
                         imagesInFlight[ImageId(frame.sessionId, frame.videoEpoch, frame.sequence)] =
                             ImageFlight(now(), frame.jpeg.size)
+                        imageSentAt.addLast(now())
+                        while (imageSentAt.size > 240) imageSentAt.removeFirst()
                         sequence = frame.sequence
                         Outgoing(WebSocketFrame(WebSocketFrame.OpCode.Binary, true,
                             if (imageProtocol >= 2) VideoPacket.encode(frame, imageProtocol) else frame.jpeg))

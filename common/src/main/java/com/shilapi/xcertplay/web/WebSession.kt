@@ -30,23 +30,29 @@ internal object WebSession {
     data class MediaSnapshot(
         val sessionId: Long, val videoEpoch: Long, val width: Int, val height: Int,
         val sourceState: String, val inputReady: Boolean, val frame: Frame?, val source: WebVideoSource?,
+        val encodedFps: Int = 0,
     )
 
     private var mediaSessionId = SecureRandom().nextLong().ushr(11)
     private var mediaEnded = true
+    private val frameTimes = ArrayDeque<Long>()
 
     /** One coherent configuration; a static source need not publish new frames. */
-    @Synchronized fun mediaSnapshot(): MediaSnapshot = MediaSnapshot(
-        mediaSessionId, generation, width, height,
-        when {
-            mediaEnded -> "stopped"
-            videoActive -> "ready"
-            frame == null -> "starting"
-            else -> "recovering"
-        },
-        !mediaEnded && videoActive && CarPlayBackgroundSession.snapshot()?.controller?.touchReady == true,
-        frame, videoSource,
-    )
+    @Synchronized fun mediaSnapshot(): MediaSnapshot {
+        val at = SystemClock.elapsedRealtime()
+        while (frameTimes.isNotEmpty() && at - frameTimes.first() >= 1000) frameTimes.removeFirst()
+        return MediaSnapshot(
+            mediaSessionId, generation, width, height,
+            when {
+                mediaEnded -> "stopped"
+                videoActive -> "ready"
+                frame == null -> "starting"
+                else -> "recovering"
+            },
+            !mediaEnded && videoActive && CarPlayBackgroundSession.snapshot()?.controller?.touchReady == true,
+            frame, videoSource, frameTimes.size,
+        )
+    }
 
     @Synchronized fun mediaMatches(sessionId: Long, epoch: Long): Boolean =
         !mediaEnded && videoActive && sessionId == mediaSessionId && epoch == generation
@@ -757,6 +763,7 @@ internal object WebSession {
         mediaEnded = false
         videoSource?.detach()
         videoSource = null
+        frameTimes.clear()
         width = w
         height = h
         frame = null
@@ -774,8 +781,11 @@ internal object WebSession {
         val endpoint =
             synchronized(this) {
                 if (owner != generation || server == null) return
-                frame = Frame(jpeg, SystemClock.elapsedRealtime(), ++sequence,
+                val at = SystemClock.elapsedRealtime()
+                frame = Frame(jpeg, at, ++sequence,
                     mediaSessionId, generation, width, height, format, quality)
+                frameTimes.addLast(at)
+                while (frameTimes.size > 240) frameTimes.removeFirst()
                 server
             }
         // Notify outside the session monitor; encoding never waits for a socket write.
@@ -789,6 +799,7 @@ internal object WebSession {
             mediaEnded = true
             videoSource?.detach()
             videoSource = null
+            frameTimes.clear()
             generation++
             frame = null
             videoActive = false
@@ -814,6 +825,7 @@ internal object WebSession {
         tlsError = cleanupError?.message
         videoSource?.detach()
         videoSource = null
+        frameTimes.clear()
         val old = server
         server = null
         runCatching { old?.stop() }.exceptionOrNull()?.let { error = it.message }

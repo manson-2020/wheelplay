@@ -44,8 +44,10 @@ Peer* peer(jlong handle) { return reinterpret_cast<Peer*>(handle); }
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_shilapi_xcertplay_web_RtcNative_create(JNIEnv* env, jobject owner, jstring profile, jboolean hevc) {
+Java_com_shilapi_xcertplay_web_RtcNative_create(JNIEnv* env, jobject owner, jstring profile, jboolean hevc,
+                                                 jstring bindAddress) {
     auto p = std::make_unique<Peer>();
+    const char* bind = bindAddress ? env->GetStringUTFChars(bindAddress, nullptr) : nullptr;
     try {
         static std::once_flag logging;
         std::call_once(logging, [] { rtcInitLogger(RTC_LOG_WARNING, [](rtcLogLevel, const char* message) {
@@ -60,7 +62,18 @@ Java_com_shilapi_xcertplay_web_RtcNative_create(JNIEnv* env, jobject owner, jstr
         config.disableAutoNegotiation = true;
         config.forceMediaTransport = true;
         config.mtu = 1200;
-        p->pc = rtcCreatePeerConnection(&config); check(p->pc);
+        config.bindAddress = bind;
+        p->pc = rtcCreatePeerConnection(&config);
+        if (p->pc < 0 && bind) {
+            // The alias may have disappeared between the handshake and the negotiation; keep
+            // the wildcard socket rather than losing the direct stream entirely.
+            __android_log_print(ANDROID_LOG_WARN, "WheelPlayRtc",
+                                "ICE bind to %s failed; using any address", bind);
+            config.bindAddress = nullptr;
+            p->pc = rtcCreatePeerConnection(&config);
+        }
+        if (bind) { env->ReleaseStringUTFChars(bindAddress, bind); bind = nullptr; }
+        check(p->pc);
         rtcSetUserPointer(p->pc, p.get());
         check(rtcSetGatheringStateChangeCallback(p->pc, [](int id, rtcGatheringState state, void* ptr) {
             if (state != RTC_GATHERING_COMPLETE) return;

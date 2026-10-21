@@ -5,7 +5,7 @@ import androidx.annotation.Keep
 /** All methods are called on one media worker; native callbacks only enqueue events. */
 @Keep
 internal class RtcNative(private val event: (String, String) -> Unit) {
-    external fun create(profile: String, hevc: Boolean = false): Long
+    external fun create(profile: String, hevc: Boolean = false, bindAddress: String? = null): Long
     external fun begin(handle: Long)
     external fun answer(handle: Long, sdp: String)
     external fun send(handle: Long, annexB: ByteArray, parameters: ByteArray?, timestamp90Khz: Long): Boolean

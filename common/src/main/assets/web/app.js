@@ -518,7 +518,11 @@ export function createRtcReceiver(createRenderer, {
   supportsCodec = codec => {
     if (typeof RTCRtpReceiver === 'undefined' || !RTCRtpReceiver.getCapabilities) return true;
     const caps = RTCRtpReceiver.getCapabilities('video');
-    return !caps || caps.codecs.some(c => c.mimeType.toLowerCase() === `video/${codec.toLowerCase()}`);
+    const codecs = (caps && caps.codecs) || [];
+    // Some head units only populate the list after setRemoteDescription. An empty list is not
+    // evidence of absence, so let the SDP answer report an unsupported media section instead.
+    if (!codecs.length) return true;
+    return codecs.some(c => c.mimeType.toLowerCase() === `video/${codec.toLowerCase()}`);
   },
   schedule = setTimeout, cancel = clearTimeout, now = () => Date.now(),
 } = {}) {
@@ -1092,13 +1096,23 @@ if (typeof document !== 'undefined') {
     const fallbackLabel = rendererStats.fallbackReason ? t(rendererStats.fallbackReason === 'processor-unsupported' ? 'web_video_renderer_unavailable' : 'web_video_renderer_failed') : '';
     const transport = rtcVisible ? `${rtc.codec === 'H265' ? 'HEVC' : 'H.264'} / WebRTC / ${rendererLabel}${rtcFps === null ? '' : ` · ${rtcFps} fps`}` : `${value.frame?.mime === 'image/webp' ? 'WebP' : 'JPEG'}${fallbackLabel}`;
     // ?diag=1 puts the last WebRTC stage on the status line; a car head unit has no console.
-    const diagnostic = diagnosticStatus ? ` · WebRTC: ${rtc?.lastReason || serverRtcHint || serverRtcDiag || 'idle'}` : '';
+    // A failed attempt shows both the stage and the capability snapshot (codecs included).
+    const rtcReason = rtc?.lastReason || serverRtcHint;
+    const diagnostic = diagnosticStatus
+      ? ` · WebRTC: ${rtcReason || serverRtcDiag || 'idle'}${rtcReason && serverRtcDiag ? ` · ${serverRtcDiag}` : ''}` : '';
+    // Still-image throughput is encode-bound when enc stays below tx; ACK latency covers send, decode and return.
+    const image = performanceStats.image;
+    const imageDiagnostic = diagnosticStatus && value.visible && !rtcVisible && image?.format
+      ? ` · enc ${image.encodedFps ?? 0} fps · tx ${image.sentFps ?? 0} fps · ack ${Math.round(image.lastAckMs || 0)} ms` : '';
     const hint = serverRtcHint === 'hevc-unsupported' ? ` · ${t('web_disable_hevc_to_use_webrtc_on_this_head_unit')}` : '';
     $('status').textContent = (value.state === 'recovering' ? t('web_video_recovering', transport) :
       value.visible ? value.interactive ? t('web_transport_touch_connected', transport, rtc?.recovering ? t('web_waiting_for_recovery') : '') :
-        t('web_video_input_unavailable', transport) : t('web_connected_waiting_for_iphone_video')) + diagnostic + hint;
-    $('media-message').hidden = !value.visible || value.interactive;
-    $('media-message').textContent = value.visible && !value.interactive ? $('status').textContent : '';
+        t('web_video_input_unavailable', transport) : t('web_connected_waiting_for_iphone_video')) + diagnostic + imageDiagnostic + hint;
+    // The overlay is the only status surface after the top bar is hidden; never duplicate a
+    // status line that is already on screen.
+    const topbarHidden = $('topbar').hidden;
+    $('media-message').hidden = !value.visible || value.interactive || !topbarHidden;
+    $('media-message').textContent = value.visible && !value.interactive && topbarHidden ? $('status').textContent : '';
   }
   function clearHeldFrame() {
     heldFrame.hidden = true; heldFrame.width = heldFrame.height = 0;

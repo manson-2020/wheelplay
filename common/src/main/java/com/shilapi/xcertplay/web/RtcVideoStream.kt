@@ -14,6 +14,7 @@ internal class RtcVideoStream(
     private val source: WebVideoSource,
     private val config: WebVideoSource.Config,
     private val recovery: RtcRecoveryPolicy,
+    private val bindAddress: String?,
     private val offer: (String) -> Unit,
     private val failure: (retryable: Boolean) -> Unit,
 ) : Closeable {
@@ -65,7 +66,7 @@ internal class RtcVideoStream(
                     "failed" -> fail("native connection failed")
                 }
             } }
-            handle = native!!.create(config.fmtp, config.codec == VideoCodec.H265)
+            handle = native!!.create(config.fmtp, config.codec == VideoCodec.H265, bindAddress)
             native!!.begin(handle)
         }
         try { worker.schedule({ if (!closed.get() && !displayed) fail("first-frame timeout") }, recovery.firstFrameMs, TimeUnit.MILLISECONDS) }

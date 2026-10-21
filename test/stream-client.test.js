@@ -591,7 +591,7 @@ test('a same-version RTC offer keeps the pending JPEG available if negotiation f
 });
 
 test('a source gap releases touch, keeps the picture, and expires with no more status messages', async () => {
-  const f = fixture(), ws = await f.connect(); mediaStatus(ws);
+  const f = fixture(); f.element('hide-toolbar').checked = true; const ws = await f.connect(); mediaStatus(ws);
   ws.onmessage({ data: videoPacket(1) }); finishJpeg(f);
   f.pointer('pointerdown', 100, 'touch-surface');
   mediaStatus(ws, { sourceState: 'recovering', streaming: false, inputReady: false });
@@ -606,6 +606,14 @@ test('a source gap releases touch, keeps the picture, and expires with no more s
   f.advance(1); assert.equal(f.element('waiting').hidden, false);
   assert.equal(ws.readyState, 1);
   mediaStatus(ws); assert.equal(f.element('waiting').hidden, true);
+});
+
+test('the touch-paused overlay is suppressed while the top bar is visible', async () => {
+  const f = fixture(), ws = await f.connect(); mediaStatus(ws);
+  ws.onmessage({ data: videoPacket(1) }); finishJpeg(f);
+  mediaStatus(ws, { sourceState: 'recovering', streaming: false, inputReady: false });
+  assert.equal(f.element('topbar').hidden, false);
+  assert.equal(f.element('media-message').hidden, true);
 });
 
 test('status during JPEG decoding leaves the old image and its input geometry intact', async () => {

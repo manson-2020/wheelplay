@@ -67,6 +67,18 @@ class WebStreamSenderTest {
         } finally { sender.close() }
     }
 
+    @Test fun sentRateCountsImagesWrittenWithinTheLastSecond() {
+        val executor = ManualExecutor(); var time = 0L; var latest = frame(1)
+        val sender = WebStreamSender({ latest }, { }, { fail() }, executor, { time }, imageProtocol = 3)
+        try {
+            sender.frameAvailable(); executor.runNext()
+            latest = frame(2); sender.frameAvailable(); executor.runNext()
+            assertEquals(2, sender.imageSnapshot()["sentFps"])
+            time = 1500
+            assertEquals(0, sender.imageSnapshot()["sentFps"])
+        } finally { sender.close() }
+    }
+
     @Test fun imageByteBudgetAllowsOneLargeFrameButNeverTwoOverBudget() {
         val executor = ManualExecutor(); var latest = frame(1).copy(jpeg = ByteArray(2 * 1024 * 1024 + 1))
         var sent = 0

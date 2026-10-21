@@ -376,6 +376,9 @@ internal class LanWebServer(
         @Volatile var imageFormat = ImageFormat.JPEG
             private set
         private var imageFallback = false
+        // The address this browser reached us on; ICE must answer from it. VPN aliases such as
+        // the Tesla compatibility address are local but not on the hotspot interface.
+        private val rtcBindAddress = RtcBindAddress.forHost(handshake.headers["host"])
 
         fun authorized() = token == null || pairing.authorized(token)
 
@@ -503,11 +506,13 @@ internal class LanWebServer(
                         source,
                         config,
                         recovery,
+                        rtcBindAddress,
                         offer = { sdp ->
                             val summary = RtcSdpSummary.summarize(sdp)
                             Log.i(
                                 "WheelPlayWeb",
                                 "rtc-offer id=$id codec=${config.codec.name} " +
+                                    "bind=${rtcBindAddress ?: "any"} " +
                                     "profile=${summary.profileLevelId ?: "none"} ${summary.describe()}",
                             )
                             synchronized(rtcLock) {
@@ -779,7 +784,8 @@ internal class LanWebServer(
                                             .put("transport", rtc?.snapshot()?.let(::JSONObject))
                                             .put("image", JSONObject(sender.imageSnapshot())
                                                 .put("format", media.frame?.format?.mime)
-                                                .put("quality", media.frame?.quality)),
+                                                .put("quality", media.frame?.quality)
+                                                .put("encodedFps", media.encodedFps)),
                                     )
                                     .put(
                                         "transport",
@@ -829,13 +835,19 @@ internal class LanWebServer(
                                         .mapNotNull { codecs?.optString(it)?.takeIf(String::isNotEmpty) }
                                 val viewport = data.optString("viewport", "0x0")
                                 if (data.has("hasPc")) {
+                                    // Mime names only: the status line has room, and the answer's
+                                    // m=video section decides whether a codec is really usable.
+                                    val names =
+                                        list.map { it.substringBefore(' ').removePrefix("video/") }
+                                            .distinct().joinToString(",").take(80)
                                     // A capability snapshot; the answer summary above omits these.
                                     rtcDiagnostics =
                                         "hasPc=${if (data.optBoolean("hasPc")) 1 else 0} " +
                                             "hasRvfc=${if (data.optBoolean("hasRvfc")) 1 else 0} " +
                                             "hasStats=${if (data.optBoolean("hasStats")) 1 else 0} " +
                                             "dpr=${data.optDouble("dpr", 0.0)} vp=$viewport " +
-                                            "screen=${data.optString("screen", "0x0")}"
+                                            "screen=${data.optString("screen", "0x0")} " +
+                                            "codecs=[$names]"
                                     Log.i(
                                         "WheelPlayWeb",
                                         "rtc-diag id=$rtcId $rtcDiagnostics " +
