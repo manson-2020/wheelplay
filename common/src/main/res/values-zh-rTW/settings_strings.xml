@@ -197,7 +197,7 @@
     <string name="settings_mapping_port_invalid">對映埠必須為 1–1023</string>
     <string name="settings_image_format">圖片格式</string>
     <string name="settings_image_format_description">JPEG 優先相容性；WebP 可節省頻寬，但可能增加編碼開銷。不支援的瀏覽器使用 JPEG。適用於圖片相容模式及 WebRTC 回退，無需重新連線。</string>
-    <string name="settings_image_quality">圖片品質（1–100）</string>
+    <string name="settings_image_quality">圖片品質</string>
     <string name="settings_image_quality_description">預設 75。數值越高，細節越多，通常也更占頻寬；JPEG 與 WebP 的相同數值不代表相同畫質。儲存後靜態畫面也會重新整理，不影響 WebRTC 視訊品質。</string>
     <string name="settings_image_quality_invalid">請輸入 1 到 100 之間的整數。</string>
 </resources>

@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.shilapi.xcertplay.*
 import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.host.R
+import com.shilapi.xcertplay.web.ImageEncodingOptions
 import com.shilapi.xcertplay.web.RtcRecoveryPolicy
 import com.shilapi.xcertplay.web.StreamTechnology
 
@@ -108,9 +109,15 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
         listOf("JPEG", "WebP"),
     )
     SettingsDescription(R.string.settings_image_format_description)
-    SettingsTextPreference(
-        actions, TextSetting.IMAGE_QUALITY, R.string.settings_image_quality,
-        state.imageQuality.toString(), numeric = true,
+    SettingsSlider(
+        title = R.string.settings_image_quality,
+        initial = state.imageQuality,
+        // 5-point steps keep the head-unit thumb usable while keeping the default 75 on the grid.
+        range = 5..ImageEncodingOptions.QUALITY_RANGE.last,
+        step = 5,
+        tag = "slider:image-quality",
+        valueLabel = { it.toString() },
+        onCommit = { actions.text(TextSetting.IMAGE_QUALITY, it.toString()) },
     )
     SettingsDescription(R.string.settings_image_quality_description)
     SettingsChoice(

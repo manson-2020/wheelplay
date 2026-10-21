@@ -184,12 +184,14 @@ internal fun SettingsSlider(
             )
             Text(
                 valueLabel(range.first + index * step),
+                modifier = Modifier.testTag("$tag:value"),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
         }
         Slider(
             value = index.toFloat(),
+            modifier = Modifier.fillMaxWidth().testTag("$tag:control"),
             onValueChange = { index = it.roundToInt().coerceIn(0, stops) },
             valueRange = 0f..stops.toFloat(),
             steps = (stops - 1).coerceAtLeast(0),

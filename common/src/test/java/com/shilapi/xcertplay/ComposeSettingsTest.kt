@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import java.io.File
@@ -35,6 +36,12 @@ open class ComposeSettingsTest {
 
     protected fun saveInput() {
         compose.onNodeWithText("保存").performClick()
+    }
+
+    /** Drags a [SettingsSlider] to a step index; the release commits the mapped value. */
+    protected fun setSlider(tag: String, index: Float) {
+        compose.onNodeWithTag("$tag:control").performScrollTo()
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(index) }
     }
 
     protected fun cancelInput() {

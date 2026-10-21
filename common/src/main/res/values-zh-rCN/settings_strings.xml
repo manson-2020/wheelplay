@@ -197,7 +197,7 @@
     <string name="settings_mapping_port_invalid">映射端口必须为 1–1023</string>
     <string name="settings_image_format">图片格式</string>
     <string name="settings_image_format_description">JPEG 优先兼容性；WebP 可节省带宽，但可能增加编码开销。不支持的浏览器使用 JPEG。适用于图片兼容模式及 WebRTC 回退，无需重新连接。</string>
-    <string name="settings_image_quality">图片质量（1–100）</string>
+    <string name="settings_image_quality">图片质量</string>
     <string name="settings_image_quality_description">默认 75。数值越高，细节越多，通常也更占带宽；JPEG 与 WebP 的相同数值不代表相同画质。保存后静态画面也会刷新，不影响 WebRTC 视频质量。</string>
     <string name="settings_image_quality_invalid">请输入 1 到 100 之间的整数。</string>
 </resources>
