@@ -26,7 +26,7 @@ function fixture(createPeer, supportsCodec = () => true) {
 test('JPEG remains active until the browser actually decodes a video frame', async () => {
   const f = fixture();
   await f.receiver.receive({ type: 'rtc-offer', id: 1, sdp: 'offer' });
-  assert.deepEqual(f.sent, [{ type: 'rtc-answer', id: 1, sdp: 'answer' }]);
+  assert.deepEqual(f.sent.filter(m => m.type !== 'rtc-diag'), [{ type: 'rtc-answer', id: 1, sdp: 'answer' }]);
   assert.equal(f.pc.appliedAnswer.sdp, 'a=setup:passive\r\n');
   assert.equal(f.receiver.active, false);
   f.pc.ontrack({ streams: [{}] }); await Promise.resolve();
@@ -43,10 +43,11 @@ test('JPEG remains active until the browser actually decodes a video frame', asy
 test('missing WebRTC and first-frame timeout both fall back without closing the control socket', async () => {
   const absent = fixture(() => { throw new Error('unsupported'); });
   await absent.receiver.receive({ type: 'rtc-offer', id: 2, sdp: 'offer' });
-  assert.deepEqual(absent.sent, [{ type: 'rtc-fallback', id: 2 }]);
+  assert.deepEqual(absent.sent.at(-1), { type: 'rtc-fallback', id: 2, reason: 'transport:Error' });
   const f = fixture(); await f.receiver.receive({ type: 'rtc-offer', id: 3, sdp: 'offer' });
   await f.tick(10000, 10000);
   assert.equal(f.pc.closed, true); assert.equal(f.stopped, 1);
+  assert.equal(f.receiver.lastReason, 'first-frame-timeout');
 });
 
 test('late SDP and stale stop cannot affect a replacement connection', async () => {
@@ -54,7 +55,7 @@ test('late SDP and stale stop cannot affect a replacement connection', async () 
   const f = fixture(); f.pc.setRemoteDescription = () => new Promise(r => { resolve = r; });
   const pending = f.receiver.receive({ type: 'rtc-offer', id: 4, sdp: 'offer' });
   f.receiver.close(); resolve(); await pending;
-  assert.equal(f.sent.length, 0);
+  assert.deepEqual(f.sent.map(m => m.type), ['rtc-diag']);
   f.pc.setRemoteDescription = async () => {};
   await f.receiver.receive({ type: 'rtc-offer', id: 5, sdp: 'offer' });
   await f.receiver.receive({ type: 'rtc-stop', id: 4 });
@@ -85,7 +86,7 @@ test('each configured grace period applies to transient disconnections and first
     assert.equal(f.receiver.active, true);
     await f.tick(grace, grace);
     assert.equal(f.receiver.active, false);
-    assert.deepEqual(f.sent.at(-1), { type: 'rtc-fallback', id: grace });
+    assert.deepEqual(f.sent.at(-1), { type: 'rtc-fallback', id: grace, reason: 'disconnect-timeout' });
   }
 });
 
@@ -103,6 +104,7 @@ test('decode progress resets a stall deadline while continuous stalled input eve
     f.setTime(at); f.receiver.progress(at); await f.tick(1000, at);
   }
   assert.equal(f.receiver.active, false);
+  assert.equal(f.receiver.lastReason, 'decode-stall');
 });
 
 test('a temporary getStats failure recovers, but persistent sampling failures exhaust the grace period', async () => {
@@ -118,6 +120,7 @@ test('a temporary getStats failure recovers, but persistent sampling failures ex
     await f.tick(1000, at); assert.equal(f.receiver.active, true);
   }
   await f.tick(1000, 7000); assert.equal(f.receiver.active, false);
+  assert.equal(f.receiver.lastReason, 'stats-unavailable');
 });
 
 test('terminal failures stay immediate and stale disconnect timers cannot stop a new session', async () => {
@@ -130,7 +133,7 @@ test('terminal failures stay immediate and stale disconnect timers cannot stop a
   stale();
   assert.equal(f.sent.some(m => m.type === 'rtc-fallback'), false);
   f.pc.connectionState = 'failed'; f.pc.onconnectionstatechange();
-  assert.deepEqual(f.sent.at(-1), { type: 'rtc-fallback', id: 10 });
+  assert.deepEqual(f.sent.at(-1), { type: 'rtc-fallback', id: 10, reason: 'connection:failed' });
 });
 
 test('a cancelled disconnect timer cannot expire a later interruption on the same peer', async () => {
@@ -169,8 +172,9 @@ test('HEVC unsupported by the receiver falls back before creating a peer', async
   const f = fixture(() => { created = true; }, codec => codec === 'H264');
   await f.receiver.receive({ type: 'rtc-offer', id: 10, codec: 'H265', sdp: 'offer' });
   assert.equal(created, false);
-  assert.deepEqual(f.sent, [{ type: 'rtc-fallback', id: 10 }]);
+  assert.deepEqual(f.sent.at(-1), { type: 'rtc-fallback', id: 10, reason: 'codec-unsupported' });
   assert.equal(f.receiver.active, false);
+  assert.equal(f.receiver.lastReason, 'codec-unsupported');
 });
 
 test('HEVC negotiates its own codec and waits for decoded output; rejected media falls back', async () => {
@@ -182,10 +186,126 @@ test('HEVC negotiates its own codec and waits for decoded output; rejected media
   assert.equal(f.receiver.active, true);
   f.pc.createAnswer = async () => ({ type: 'answer', sdp: 'm=video 0 UDP/TLS/RTP/SAVPF 96\r\n' });
   await f.receiver.receive({ type: 'rtc-offer', id: 12, codec: 'H265', sdp: 'offer' });
-  assert.deepEqual(f.sent.at(-1), { type: 'rtc-fallback', id: 12 });
+  assert.deepEqual(f.sent.at(-1), { type: 'rtc-fallback', id: 12, reason: 'codec-rejected' });
   assert.equal(f.receiver.active, false);
 });
 
+
+test('each offer reports one capability snapshot and one answer summary', async () => {
+  const f = fixture();
+  await f.receiver.receive({ type: 'rtc-offer', id: 40, sdp: 'offer' });
+  const diag = f.sent.filter(m => m.type === 'rtc-diag');
+  const snapshots = diag.filter(m => 'hasPc' in m);
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].id, 40);
+  assert.equal(snapshots[0].hasPc, false); // This runtime has no WebRTC at all.
+  assert.deepEqual(snapshots[0].codecs, []);
+  assert.equal(snapshots[0].hasRvfc, false);
+  const summaries = diag.filter(m => m.answer);
+  assert.equal(summaries.length, 1);
+  assert.deepEqual(summaries[0].answer,
+    { media: 'none', codecs: '', setup: 'none', candidates: 'host:0,srflx:0,relay:0,mdns:0' });
+  assert.equal(f.receiver.lastReason, null);
+  await f.receiver.receive({ type: 'rtc-offer', id: 41, sdp: 'offer' });
+  assert.equal(f.sent.filter(m => m.type === 'rtc-diag' && 'hasPc' in m).length, 2);
+  f.pc.connectionState = 'failed'; f.pc.onconnectionstatechange();
+  assert.equal(f.receiver.lastReason, 'connection:failed');
+});
+
+test('the answer summary names media, codec and candidate mix but never the SDP', async () => {
+  const f = fixture();
+  const sdp = [
+    'm=video 9 UDP/TLS/RTP/SAVPF 96',
+    'a=rtpmap:96 H264/90000',
+    'a=fmtp:96 packetization-mode=1;profile-level-id=42e01f',
+    'a=setup:passive',
+    'a=candidate:1 1 UDP 2122260223 192.168.43.10 50000 typ host',
+    'a=candidate:2 1 UDP 1686052607 1ab2cd.local 60000 typ host',
+    'a=candidate:3 1 UDP 1686052607 203.0.113.7 60001 typ srflx',
+  ].join('\r\n');
+  f.pc.localDescription = { sdp };
+  await f.receiver.receive({ type: 'rtc-offer', id: 42, sdp: 'offer' });
+  assert.equal(f.sent.find(m => m.type === 'rtc-answer').sdp, sdp);
+  const summary = f.sent.find(m => m.type === 'rtc-diag' && m.answer).answer;
+  assert.deepEqual(summary, {
+    media: 'video:9',
+    codecs: 'H264/90000 packetization-mode=1;profile-level-id=42e01f',
+    setup: 'passive',
+    candidates: 'host:2,srflx:1,relay:0,mdns:1',
+  });
+});
+
+test('a rejected DTLS role rewrite retries the generated answer before falling back', async () => {
+  const f = fixture(); let calls = 0;
+  f.pc.setLocalDescription = async description => {
+    calls++;
+    if (calls === 1) throw Object.assign(new Error('role'), { name: 'InvalidModificationError' });
+    f.pc.appliedAnswer = description;
+  };
+  await f.receiver.receive({ type: 'rtc-offer', id: 50, sdp: 'offer' });
+  assert.equal(calls, 2);
+  assert.equal(f.pc.appliedAnswer.sdp, 'a=setup:active\r\n');
+  assert.deepEqual(f.sent.find(m => m.type === 'rtc-answer'), { type: 'rtc-answer', id: 50, sdp: 'answer' });
+  assert.equal(f.sent.some(m => m.type === 'rtc-fallback'), false);
+});
+
+test('gathering that never completes still sends the gathered answer', async () => {
+  const f = fixture(); f.pc.iceGatheringState = 'gathering';
+  await f.receiver.receive({ type: 'rtc-offer', id: 51, sdp: 'offer' });
+  const complete = f.pc.onicegatheringstatechange;
+  assert.equal(f.sent.some(m => m.type === 'rtc-answer'), false);
+  await f.tick(3000, 3000);
+  assert.deepEqual(f.sent.find(m => m.type === 'rtc-answer'), { type: 'rtc-answer', id: 51, sdp: 'answer' });
+  f.pc.iceGatheringState = 'complete'; complete();
+  assert.equal(f.sent.filter(m => m.type === 'rtc-answer').length, 1);
+});
+
+test('answer, DTLS role and gathering failures each name their stage', async () => {
+  const answer = fixture();
+  answer.pc.createAnswer = async () => { throw Object.assign(new Error('bad'), { name: 'InvalidStateError' }); };
+  await answer.receiver.receive({ type: 'rtc-offer', id: 70, sdp: 'offer' });
+  assert.deepEqual(answer.sent.at(-1), { type: 'rtc-fallback', id: 70, reason: 'answer:InvalidStateError' });
+
+  const describe = fixture();
+  describe.pc.setLocalDescription = async () => { throw Object.assign(new Error('role'), { name: 'InvalidModificationError' }); };
+  await describe.receiver.receive({ type: 'rtc-offer', id: 71, sdp: 'offer' });
+  assert.deepEqual(describe.sent.at(-1),
+    { type: 'rtc-fallback', id: 71, reason: 'local-desc:InvalidModificationError' });
+
+  const gathering = fixture();
+  gathering.pc.iceGatheringState = 'gathering';
+  gathering.pc.localDescription = null;
+  await gathering.receiver.receive({ type: 'rtc-offer', id: 72, sdp: 'offer' });
+  await gathering.tick(3000, 3000);
+  assert.deepEqual(gathering.sent.at(-1), { type: 'rtc-fallback', id: 72, reason: 'gathering-timeout' });
+});
+
+test('a decoder error after the first frame names the decode stage', async () => {
+  const f = fixture();
+  await f.receiver.receive({ type: 'rtc-offer', id: 73, sdp: 'offer' });
+  f.pc.ontrack({ streams: [{}] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.receiver.active, true);
+  f.video.onerror();
+  assert.deepEqual(f.sent.at(-1), { type: 'rtc-fallback', id: 73, reason: 'decode-error' });
+  assert.equal(f.receiver.lastReason, 'decode-error');
+});
+
+test('remote description and playback failures name their stage', async () => {
+  const rejected = fixture();
+  rejected.pc.setRemoteDescription = async () => {
+    throw Object.assign(new Error('unsupported profile'), { name: 'OperationError' });
+  };
+  await rejected.receiver.receive({ type: 'rtc-offer', id: 60, sdp: 'offer' });
+  assert.deepEqual(rejected.sent.at(-1), { type: 'rtc-fallback', id: 60, reason: 'offer:OperationError' });
+  assert.equal(rejected.pc.closed, true);
+
+  const blocked = fixture();
+  blocked.video.play = async () => { throw Object.assign(new Error('blocked'), { name: 'NotAllowedError' }); };
+  await blocked.receiver.receive({ type: 'rtc-offer', id: 61, sdp: 'offer' });
+  blocked.pc.ontrack({ streams: [{}] }); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(blocked.sent.at(-1), { type: 'rtc-fallback', id: 61, reason: 'play:NotAllowedError' });
+});
 
 test('receiver reports interval rates and separate presentation, decode and jitter timings', async () => {
   const f = fixture(); let callback, canceled;

@@ -56,6 +56,8 @@ internal object BrowserStrings {
             "web_connected_waiting_for_video" to UiR.string.web_connected_waiting_for_video,
             "web_waiting_for_iphone_video" to UiR.string.web_waiting_for_iphone_video,
             "web_fallback" to UiR.string.web_fallback,
+            "web_disable_hevc_to_use_webrtc_on_this_head_unit" to
+                UiR.string.web_disable_hevc_to_use_webrtc_on_this_head_unit,
             "web_transport_touch_connected" to UiR.string.web_transport_touch_connected,
             "web_waiting_for_recovery" to UiR.string.web_waiting_for_recovery,
             "web_connected_waiting_for_iphone_video" to

@@ -26,6 +26,33 @@ WebSocket 控制连接的心跳与重连规则独立于视频策略；整个网�
 
 当前一次视频配置只尝试一次 WebRTC；回退后保留 JPEG，直到重新连接浏览器或视频配置改变。因此它不会在同一会话中不断往返切换。容忍策略减少的是过早放弃 WebRTC 的次数。
 
+## 失败归因（reason / rtc-diag）
+
+所有立即回退过去都是一个不带原因的 `rtc-fallback`，服务端只关流不记日志，8 个阶段在日志里完全相同。现在回退报文固定携带 `reason`；收到 offer 时网页先发一次 `rtc-diag` 能力快照（UA、`RTCRtpReceiver` 的编码能力、`hasPc`/`hasRvfc`/`hasStats` 是否存在、dpr、视口与屏幕尺寸，限 1 KB），answer 生成后再发一条同类型消息，携带网页自己解析的 answer 摘要（`m=video` 端口、rtpmap/fmtp、`a=setup`、候选 host/srflx/relay/mdns 计数）。两条都不发送完整 SDP。
+
+| reason | 含义 | 定向动作 |
+| --- | --- | --- |
+| `rtc-not-requested` | 服务端可见 WebRTC 能力，但 15 秒内没有收到 `rtc-start`（车机没有 `RTCPeerConnection`） | 走能力提示，不再折腾 SDP |
+| `codec-unsupported` | `supportsCodec` 返回 false | 关闭 iPhone HEVC；服务端会记住并停止再发 H.265 offer |
+| `codec-rejected` | answer 出现 `m=video 0` | profile 为 `4d`/`64` 时日志附带 `profile-mismatch`，才考虑转码 |
+| `offer:*` / `answer:*` | `setRemoteDescription` / answer 生成抛错 | 按 `err.name` 决定是否净化 SDP |
+| `local-desc:*` | DTLS 角色改写后 `setLocalDescription` 抛错 | 已自动用原始 `a=setup:active` 重试一次 |
+| `gathering-timeout` 相关 | 候选收集 3 秒未 complete | 已改为到时发送已收集候选，不再等首帧超时 |
+| `first-frame-timeout` / `decode-error` / `play:*` | 解码或播放启动失败 | 用 `?unhide=1` 验证是否为隐藏 video 不解码 |
+| `decode-stall` / `stats-unavailable` | 解码不前进 / 取统计连续失败 | 网络与丢包排查 |
+| `connection:<state>` / `disconnect-timeout` | 连接终态 / 短暂断开超时 | 见上文容忍时间策略 |
+
+服务端日志（tag `WheelPlayWeb`）新增：
+
+- `rtc-offer id=.. codec=.. media=video:9 codecs=<rtpmap + fmtp> setup=actpass candidates=host:N,srflx:N,relay:N,mdns:N`
+- `rtc-answer id=.. ...`（同上；`media=video:0` 即被拒）
+- `rtc-fallback id=.. reason=.. codec=.. profile=.. [profile-mismatch] t=..`
+- `rtc-diag id=.. hasPc=1 hasRvfc=1 hasStats=1 dpr=.. vp=.. screen=.. codecs=[..] ua=..`
+- `rtc-diag id=.. answer media=video:9 codecs=<rtpmap + fmtp> setup=passive candidates=host:N,srflx:N,relay:N,mdns:N`（网页端视角）
+- `rtc-not-requested waited=..ms codec=..`（能力可见但浏览器从未请求）
+
+车机上可用 `?diag=1` 在状态栏直接看到 ` · WebRTC: <lastReason | 能力快照>`，不依赖 devtools / adb；`?unhide=1` 让首帧前的 video 保持视口内 1 px、`opacity:0` 的布局盒（`pending-video`）而不是 `display:none`，用于验证老 Chromium 是否不解码隐藏元素。二者都只是开关，默认行为不变。HEVC 被拒后状态栏会提示「在 WheelPlay 设置中关闭 HEVC 才能在此车机上使用 WebRTC」。
+
 ## 排查与真机验证
 
 浏览器控制台的 `window.wheelplayStats` 提供分段指标。`transport.recoveryGraceMs` 可核对当前策略；Android 的 `WheelPlayRtc` 日志记录发送、关键帧、解码、连接或首帧超时等回退原因。

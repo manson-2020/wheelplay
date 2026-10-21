@@ -69,7 +69,7 @@ export function createControlOutbox(socket, {
         if (kind === 'move' && tail && tail.kind === 'move') tail.json = json;
         else if (touches.length < 64) touches.push({ kind, json });
         else { fail(); return false; }
-      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'phone-connect'].includes(data.type)) {
+      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'phone-connect'].includes(data.type)) {
         if (signals.length >= 8 || json.length > 32768) { fail(); return false; }
         signals.push(json);
       } else return false;
@@ -161,16 +161,44 @@ export function createRtcReceiver(video, {
     const caps = RTCRtpReceiver.getCapabilities('video');
     return !caps || caps.codecs.some(c => c.mimeType.toLowerCase() === `video/${codec.toLowerCase()}`);
   },
+  // Keep a 1 px layout box instead of display:none until the first frame is decoded;
+  // some head-unit builds never decode a hidden video element.
+  keepVideoVisible = false,
   schedule = setTimeout, cancel = clearTimeout, now = () => Date.now(),
 } = {}) {
   let frameCallback = null, presented = 0, previousStats = null;
-  let codec = 'H264';
-  let peer = null, id = null, generation = 0, timeout = null, statsTimer = null, ready = false;
+  let codec = 'H264', lastReason = null;
+  let peer = null, id = null, generation = 0, timeout = null, gathering = null, statsTimer = null, ready = false;
   let lastDecoded = 0, sent = 0, lastSentAt = 0, sentAtLastProgress = 0;
   let stalledSince = null, statsFailedSince = null, disconnectTimer = null, recoveryGraceMs = 10000;
+  // Every failure used to look identical from the phone; the reason now travels with the
+  // fallback so one head-unit retry names the stage that failed.
+  const errorName = error => String((error && error.name) || 'error').slice(0, 32);
+  function diagnostics() {
+    let codecs = [];
+    try {
+      if (typeof RTCRtpReceiver !== 'undefined' && RTCRtpReceiver.getCapabilities) {
+        codecs = (RTCRtpReceiver.getCapabilities('video') || {}).codecs || [];
+        codecs = codecs.slice(0, 12).map(entry => `${entry.mimeType}${entry.sdpFmtpLine ? ` ${entry.sdpFmtpLine}` : ''}`.slice(0, 96));
+      }
+    } catch (_) { codecs = []; }
+    const snapshot = {
+      ua: String((typeof navigator !== 'undefined' && navigator.userAgent) || '').slice(0, 128),
+      codecs,
+      hasPc: typeof RTCPeerConnection !== 'undefined',
+      hasRvfc: Boolean(video.requestVideoFrameCallback),
+      hasStats: typeof RTCPeerConnection !== 'undefined' && Boolean(RTCPeerConnection.prototype && RTCPeerConnection.prototype.getStats),
+      dpr: typeof devicePixelRatio === 'number' ? Math.round(devicePixelRatio * 100) / 100 : 0,
+      viewport: `${typeof innerWidth === 'number' ? innerWidth : 0}x${typeof innerHeight === 'number' ? innerHeight : 0}`,
+      screen: typeof screen !== 'undefined' ? `${screen.width}x${screen.height}` : '0x0',
+    };
+    // The whole snapshot stays under 1 KB; trim codecs first, never the capability flags.
+    while (codecs.length > 0 && JSON.stringify({ ...snapshot, codecs }).length > 1024) codecs = codecs.slice(0, -1);
+    return { ...snapshot, codecs };
+  }
   function close() {
-    generation++; cancel(timeout); cancel(statsTimer); cancel(disconnectTimer);
-    timeout = null; statsTimer = null; disconnectTimer = null;
+    generation++; cancel(timeout); cancel(gathering); cancel(statsTimer); cancel(disconnectTimer);
+    timeout = null; gathering = null; statsTimer = null; disconnectTimer = null;
     stalledSince = null; statsFailedSince = null;
     const old = peer; peer = null; ready = false; id = null;
     if (frameCallback !== null && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(frameCallback);
@@ -178,12 +206,14 @@ export function createRtcReceiver(video, {
     video.onloadeddata = null; video.onerror = null;
     if (old) { old.ontrack = null; old.onconnectionstatechange = null; old.close(); }
     video.srcObject = null; video.hidden = true;
+    if (video.classList) { video.classList.toggle('offscreen-video', false); video.classList.toggle('pending-video', false); }
     onReset();
   }
-  function fallback() {
+  function fallback(reason = 'unspecified') {
     const current = id;
+    lastReason = reason;
     close(); onStop();
-    if (current !== null) send({ type: 'rtc-fallback', id: current });
+    if (current !== null) send({ type: 'rtc-fallback', id: current, reason });
   }
   async function receive(message) {
     if (message.type === 'rtc-stop') {
@@ -194,9 +224,13 @@ export function createRtcReceiver(video, {
     close(); id = message.id; codec = message.codec === 'H265' ? 'H265' : 'H264';
     recoveryGraceMs = [4000, 10000, 30000].includes(message.recoveryGraceMs) ? message.recoveryGraceMs : 10000;
     const token = generation, current = () => generation === token && peer !== null;
-    timeout = schedule(() => { if (generation === token) fallback(); }, Math.max(10000, recoveryGraceMs));
+    if (keepVideoVisible) { video.hidden = false; if (video.classList) video.classList.toggle('pending-video', true); }
+    // One capability snapshot per offer: a head unit without remote debugging can still
+    // report what it supports and whether the WebRTC APIs exist at all.
+    send({ type: 'rtc-diag', id, ...diagnostics() });
+    if (!supportsCodec(codec)) { fallback('codec-unsupported'); return; }
+    timeout = schedule(() => { if (generation === token) fallback('first-frame-timeout'); }, Math.max(10000, recoveryGraceMs));
     try {
-      if (!supportsCodec(codec)) { fallback(); return; }
       const pc = createPeer(); peer = pc;
       const displayed = () => {
         if (!current() || ready || !video.videoWidth || video.readyState < 2) return;
@@ -243,23 +277,23 @@ export function createRtcReceiver(video, {
             previousStats = { at, stat, presented };
             lastDecoded = decoded;
             // Static CarPlay screens legitimately stop producing frames.
-            if (stalledSince !== null && at - stalledSince >= recoveryGraceMs) fallback();
+            if (stalledSince !== null && at - stalledSince >= recoveryGraceMs) fallback('decode-stall');
           });
         } catch (_) {
           if (current()) {
             if (statsFailedSince === null) statsFailedSince = now();
-            if (now() - statsFailedSince >= recoveryGraceMs) fallback();
+            if (now() - statsFailedSince >= recoveryGraceMs) fallback('stats-unavailable');
           }
         }
         if (current()) statsTimer = schedule(sample, 1000);
       };
       pc.onconnectionstatechange = () => {
         if (!current()) return;
-        if (['failed', 'closed'].includes(pc.connectionState)) { fallback(); return; }
+        if (['failed', 'closed'].includes(pc.connectionState)) { fallback(`connection:${pc.connectionState}`); return; }
         if (pc.connectionState === 'disconnected') {
           if (disconnectTimer === null) {
             const timer = schedule(() => {
-              if (current() && disconnectTimer === timer && pc.connectionState !== 'connected') fallback();
+              if (current() && disconnectTimer === timer && pc.connectionState !== 'connected') fallback('disconnect-timeout');
             }, recoveryGraceMs);
             disconnectTimer = timer;
           }
@@ -270,7 +304,7 @@ export function createRtcReceiver(video, {
       pc.ontrack = event => {
         if (!current()) return;
         video.onloadeddata = displayed;
-        video.onerror = () => { if (current()) fallback(); };
+        video.onerror = () => { if (current()) fallback('decode-error'); };
         if (video.requestVideoFrameCallback && frameCallback === null) {
           let firstPresented = null;
           const observe = (_, metadata) => {
@@ -284,27 +318,80 @@ export function createRtcReceiver(video, {
         video.srcObject = event.streams[0] || new MediaStream([event.track]);
         onTrack();
         if (!current()) return;
-        video.play().then(displayed).catch(() => { if (current()) fallback(); });
+        video.play().then(displayed).catch(error => { if (current()) fallback(`play:${errorName(error)}`); });
       };
-      await pc.setRemoteDescription({ type: 'offer', sdp: message.sdp });
+      try { await pc.setRemoteDescription({ type: 'offer', sdp: message.sdp }); }
+      catch (error) { if (generation === token) fallback(`offer:${errorName(error)}`); return; }
       if (!current()) return;
-      const answer = await pc.createAnswer();
+      let answer;
+      try { answer = await pc.createAnswer(); }
+      catch (error) { if (generation === token) fallback(`answer:${errorName(error)}`); return; }
       if (!current()) return;
-      if (/^m=video 0(?: |\r?$)/m.test(answer.sdp)) { fallback(); return; }
+      if (/^m=video 0(?: |\r?$)/m.test(answer.sdp)) { fallback('codec-rejected'); return; }
       // Use the browser as DTLS server: Mbed TLS 3.6 cannot reassemble a fragmented
       // ClientHello from newer Chrome versions. Passive is a standard answer role.
-      await pc.setLocalDescription({ type: answer.type, sdp: answer.sdp.replace(/a=setup:active/g, 'a=setup:passive') });
+      const passive = { type: answer.type, sdp: answer.sdp.replace(/a=setup:active/g, 'a=setup:passive') };
+      try { await pc.setLocalDescription(passive); }
+      catch (_) {
+        // Some head-unit builds reject a rewritten DTLS role; keep the generated answer.
+        try { await pc.setLocalDescription(answer); }
+        catch (error) { if (generation === token) fallback(`local-desc:${errorName(error)}`); return; }
+      }
       if (!current()) return;
+      // One line of negotiation facts about the answer we are about to send. The full SDP stays
+      // on the LAN, but `m=video 0`, the codec fmtp and the candidate mix are what explain a
+      // rejection from a head unit with no reachable console.
+      const answerSummary = sdp => {
+        const lines = String(sdp || '').split(/\r?\n/).map(line => line.trim());
+        const media = lines.find(line => line.startsWith('m=video ')) || '';
+        const fields = media.replace(/^m=video\s+/, '').split(/\s+/).filter(Boolean);
+        const payload = fields[2] || '';
+        const rtpmap = lines.find(line => line.startsWith(`a=rtpmap:${payload} `)) || '';
+        const fmtp = lines.find(line => line.startsWith(`a=fmtp:${payload} `)) || '';
+        const codec = `${rtpmap.replace('a=rtpmap:', '').replace(`${payload} `, '')} ${fmtp.replace('a=fmtp:', '').replace(`${payload} `, '')}`.trim();
+        const setup = lines.find(line => line.startsWith('a=setup:')) || '';
+        let host = 0, srflx = 0, relay = 0, mdns = 0;
+        for (const line of lines) {
+          if (!line.startsWith('a=candidate:')) continue;
+          const parts = line.slice('a=candidate:'.length).split(/\s+/).filter(Boolean);
+          if ((parts[4] || '').toLowerCase().endsWith('.local')) mdns++;
+          if (parts[7] === 'host') host++;
+          else if (parts[7] === 'srflx') srflx++;
+          else if (parts[7] === 'relay') relay++;
+        }
+        return {
+          media: fields.length ? `video:${fields[0]}` : 'none',
+          codecs: codec.slice(0, 200),
+          setup: setup.replace('a=setup:', '') || 'none',
+          candidates: `host:${host},srflx:${srflx},relay:${relay},mdns:${mdns}`,
+        };
+      };
+      let answered = false;
       const answerReady = () => {
-        if (!current() || pc.iceGatheringState !== 'complete') return;
+        if (answered || !current() || !pc.localDescription) return;
+        answered = true; cancel(gathering); gathering = null;
         pc.onicegatheringstatechange = null;
-        send({ type: 'rtc-answer', id, sdp: pc.localDescription.sdp });
+        const sdp = pc.localDescription.sdp;
+        send({ type: 'rtc-answer', id, sdp });
+        send({ type: 'rtc-diag', id, answer: answerSummary(sdp) });
       };
       if (pc.iceGatheringState === 'complete') answerReady();
-      else pc.onicegatheringstatechange = answerReady;
-    } catch (_) { if (generation === token) fallback(); }
+      else {
+        pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') answerReady(); };
+        // Head units that never report completion would otherwise reach the first-frame
+        // timeout with no answer sent at all; send what has been gathered.
+        gathering = schedule(() => {
+          if (generation !== token) return;
+          // setLocalDescription succeeded, so this only fails on a browser that produced an
+          // answer without an SDP; name it instead of waiting for the first-frame timeout.
+          if (!pc.localDescription) { fallback('gathering-timeout'); return; }
+          answerReady();
+        }, 3000);
+      }
+    } catch (error) { if (generation === token) fallback(`transport:${errorName(error)}`); }
   }
   return { receive, close, fallback, get active() { return ready; }, get codec() { return codec; },
+    get lastReason() { return lastReason; },
     get recovering() { return ready && (disconnectTimer !== null || stalledSince !== null || statsFailedSince !== null); },
     progress(count) {
       if (count > sent) {
@@ -347,6 +434,12 @@ if (typeof document !== 'undefined') {
   let pairingToken = null, qrGeneration = 0, qrTimer = null, qrRequest = null;
   let viewportReportTimer = null, lastViewportSignature = '';
   const canvasOption = $('canvas-video');
+  // `?diag=1` appends the last WebRTC failure reason to the status line; `?unhide=1` keeps a
+  // 1 px layout box for the decoder while the first frame is still pending. Parsed with a plain
+  // regex because embedded runtimes may not expose URLSearchParams.
+  const queryFlag = name => new RegExp(`(?:^|[?&])${name}=1(?:&|$)`).test(String(location.search || ''));
+  const diagnosticStatus = queryFlag('diag');
+  const keepVideoVisible = queryFlag('unhide');
   const canvasPreference = 'wheelplay.canvasVideo';
   try { canvasOption.checked = window.localStorage.getItem(canvasPreference) === 'true'; } catch (_) {}
   canvasOption.addEventListener('change', () => {
@@ -356,7 +449,7 @@ if (typeof document !== 'undefined') {
     onFrame: (frameWidth, frameHeight) => {
       width = frameWidth; height = frameHeight; screen.hidden = true; setLive(true);
     },
-    onError: () => { if (rtc) rtc.fallback(); },
+    onError: () => { if (rtc) rtc.fallback('canvas-error'); },
   });
   const pairApi = async (path, request = null) => {
     const headers = request?.token ? { 'X-Pair-Token': request.token } :
@@ -598,6 +691,7 @@ if (typeof document !== 'undefined') {
   function cleanupRtc() {
     if (rtc) rtc.close(); rtc = null; rtcRequested = false; rtcFps = null;
     canvasRenderer.stop();
+    if (video.classList) { video.classList.toggle('offscreen-video', false); video.classList.toggle('pending-video', false); }
     performanceStats.source = performanceStats.transport = performanceStats.receiver = null;
     screen.hidden = !(screen.complete && screen.naturalWidth > 0); video.hidden = true;
   }
@@ -658,17 +752,19 @@ if (typeof document !== 'undefined') {
       paired = true; attempts = 0; lastStatus = Date.now();
       browserAudio.attach();
       cleanupRtc();
-      rtc = createRtcReceiver(video, { send,
+      rtc = createRtcReceiver(video, { send, keepVideoVisible,
         onTrack: () => { if (useCanvas) canvasRenderer.prepare(); },
         onReset: () => canvasRenderer.stop(),
         onReady: () => {
           if (socket !== ws) return;
           if (useCanvas) { canvasRenderer.start(); return; }
+          if (video.classList) { video.classList.toggle('offscreen-video', false); video.classList.toggle('pending-video', false); }
           screen.hidden = true; video.hidden = false;
           width = video.videoWidth; height = video.videoHeight; setLive(true);
         },
         onStop: () => {
           if (socket !== ws) return;
+          if (video.classList) { video.classList.toggle('offscreen-video', false); video.classList.toggle('pending-video', false); }
           screen.hidden = !(screen.complete && screen.naturalWidth > 0); video.hidden = true; rtcFps = null;
           setLive(Boolean(lastFrame && screen.naturalWidth));
         },
@@ -720,7 +816,11 @@ if (typeof document !== 'undefined') {
           if (!data.rtcAvailable) rtcRequested = false;
           setLive(Boolean(data.streaming && (rtc.active || lastFrame && screen.naturalWidth)));
           const transport = rtc.active ? `${rtc.codec === 'H265' ? 'HEVC' : 'H.264'} / WebRTC${useCanvas ? ' / Canvas' : ''}${rtcFps === null ? '' : ` · ${rtcFps} fps`}` : `JPEG${data.fallback ? t("web_fallback") : ''}`;
-          $('status').textContent = live ? t("web_transport_touch_connected", transport, rtc.recovering ? t("web_waiting_for_recovery") : '') : t("web_connected_waiting_for_iphone_video");
+          // `?diag=1` names the failing stage on the head-unit screen itself: the last fallback
+          // reason, or the phone-recorded capability snapshot / not-requested hint while healthy.
+          const diagnostic = diagnosticStatus ? ` · WebRTC: ${rtc.lastReason || data.rtcHint || data.rtcDiag || 'idle'}` : '';
+          const hint = data.rtcHint === 'hevc-unsupported' ? ` · ${t("web_disable_hevc_to_use_webrtc_on_this_head_unit")}` : '';
+          $('status').textContent = (live ? t("web_transport_touch_connected", transport, rtc.recovering ? t("web_waiting_for_recovery") : '') : t("web_connected_waiting_for_iphone_video")) + diagnostic + hint;
         }
         if (data.type === 'input-unavailable') $('status').textContent = t("web_waiting_for_iphone_touch_input");
         return;

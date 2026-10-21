@@ -483,6 +483,7 @@
     <string name="web_connected_waiting_for_video">已连接 · 等待画面</string>
     <string name="web_waiting_for_iphone_video">等待 iPhone 画面…</string>
     <string name="web_fallback">" · 已回退"</string>
+    <string name="web_disable_hevc_to_use_webrtc_on_this_head_unit">在 WheelPlay 设置中关闭 HEVC 才能在此车机上使用 WebRTC</string>
     <string name="web_transport_touch_connected">%1$s%2$s · 触控已连接</string>
     <string name="web_waiting_for_recovery">" · 等待恢复"</string>
     <string name="web_connected_waiting_for_iphone_video">已连接 · 等待 iPhone 画面</string>

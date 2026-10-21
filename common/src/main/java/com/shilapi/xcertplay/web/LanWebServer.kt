@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import com.shilapi.xcertplay.airplay.AirPlayContact
+import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.shared.R as UiR
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoWSD
@@ -401,6 +402,15 @@ internal class LanWebServer(
         private var rtcAttempted = false
         private var rtcId = 0L
         private var rtcAnswered = false
+        // Stage-tagged WebRTC evidence: head units have no reachable console, so the phone keeps
+        // what it can see from its own offer and from the browser's answer and fallback reason.
+        private var rtcAnswer: RtcSdpSummary.Summary? = null
+        private var rtcOffer: RtcSdpSummary.Summary? = null
+        private var rtcDiagnostics: String? = null
+        private var rtcHint: String? = null
+        private var hevcSupported = true
+        private var rtcAvailableSince = 0L
+        private var rtcNotRequested = false
         // Head-unit telemetry placeholder: last live-transition count reported by the browser.
         private var lastLiveTransitions = -1
 
@@ -447,8 +457,23 @@ internal class LanWebServer(
                 if (rtcAttempted || ended.get() || !WebSession.videoActive) return
                 val source = rtcSource ?: return
                 val config = rtcConfig ?: return
+                if (config.codec == VideoCodec.H265 && !hevcSupported) {
+                    // The browser already reported that it cannot decode HEVC; the iPhone, not the
+                    // service, chooses the codec, so keep JPEG and ask for the setting to change.
+                    rtcHint = "hevc-unsupported"
+                    // Counts as attempted so `rtcAvailable` turns false: otherwise the head unit
+                    // keeps offering and the 15 s watchdog would overwrite this hint.
+                    rtcAttempted = true
+                    return
+                }
+                rtcHint = null
                 rtcAttempted = true
                 rtcAnswered = false
+                rtcAnswer = null
+                rtcOffer = null
+                rtcDiagnostics = null
+                rtcAvailableSince = 0L
+                rtcNotRequested = false
                 val id = ++rtcId
                 Log.i(
                     "WheelPlayWeb",
@@ -462,7 +487,14 @@ internal class LanWebServer(
                         config,
                         recovery,
                         offer = { sdp ->
+                            val summary = RtcSdpSummary.summarize(sdp)
+                            Log.i(
+                                "WheelPlayWeb",
+                                "rtc-offer id=$id codec=${config.codec.name} " +
+                                    "profile=${summary.profileLevelId ?: "none"} ${summary.describe()}",
+                            )
                             synchronized(rtcLock) {
+                                rtcOffer = summary
                                 if (!ended.get() && rtc != null && rtcId == id)
                                     reply(
                                         WebStreamSender.Control.RTC,
@@ -603,8 +635,15 @@ internal class LanWebServer(
                         message.binaryPayload.size <= 32768
                 )
                 val data = JSONObject(message.textPayload)
-                if (data.optString("type") != "rtc-answer")
-                    require(message.binaryPayload.size <= 2048)
+                // The answer carries an SDP and the capability snapshot carries codec fmtp lines;
+                // every other control message stays on the original two-kilobyte budget.
+                val limit =
+                    when (data.optString("type")) {
+                        "rtc-answer" -> 32768
+                        "rtc-diag" -> 4096
+                        else -> 2048
+                    }
+                require(message.binaryPayload.size <= limit)
                 lastSeen = SystemClock.elapsedRealtime()
                 when (data.getString("type")) {
                     "audio-ready" -> {
@@ -648,6 +687,24 @@ internal class LanWebServer(
                         reconcileVideo()
                         val frame = WebSession.frame
                         synchronized(rtcLock) {
+                            val rtcAvailable =
+                                rtcConfig != null && !rtcAttempted && WebSession.videoActive &&
+                                    !WebSession.localDisplayActive
+                            if (rtcAvailable) {
+                                val at = SystemClock.elapsedRealtime()
+                                if (rtcAvailableSince == 0L) rtcAvailableSince = at
+                                else if (!rtcNotRequested && at - rtcAvailableSince >= 15000) {
+                                    // A head unit without RTCPeerConnection never sends rtc-start, so
+                                    // without this line it is indistinguishable from plain JPEG.
+                                    rtcNotRequested = true
+                                    rtcHint = "rtc-not-requested"
+                                    Log.i(
+                                        "WheelPlayWeb",
+                                        "rtc-not-requested waited=${at - rtcAvailableSince}ms " +
+                                            "codec=${rtcConfig?.codec?.name ?: "none"}",
+                                    )
+                                }
+                            } else rtcAvailableSince = 0L
                             reply(
                                 WebStreamSender.Control.STATUS,
                                 JSONObject()
@@ -667,11 +724,9 @@ internal class LanWebServer(
                                                 rtc?.connected == true ||
                                                 rtc?.holdingFrame == true),
                                     )
-                                    .put(
-                                        "rtcAvailable",
-                                        rtcConfig != null && !rtcAttempted && WebSession.videoActive &&
-                                            !WebSession.localDisplayActive,
-                                    )
+                                    .put("rtcAvailable", rtcAvailable)
+                                    .put("rtcHint", rtcHint ?: "")
+                                    .put("rtcDiag", rtcDiagnostics ?: "")
                                     .put("rtcFrames", rtc?.sentFrames ?: 0)
                                     .put(
                                         "performance",
@@ -700,7 +755,50 @@ internal class LanWebServer(
                         synchronized(rtcLock) {
                             if (data.getLong("id") == rtcId && rtc != null && !rtcAnswered) {
                                 rtcAnswered = true
-                                rtc?.answer(data.getString("sdp"))
+                                val sdp = data.getString("sdp")
+                                rtcAnswer = RtcSdpSummary.summarize(sdp)
+                                Log.i(
+                                    "WheelPlayWeb",
+                                    "rtc-answer id=$rtcId ${rtcAnswer?.describe()}",
+                                )
+                                rtc?.answer(sdp)
+                            }
+                        }
+                    "rtc-diag" ->
+                        synchronized(rtcLock) {
+                            if (data.getLong("id") == rtcId) {
+                                val answer = data.optJSONObject("answer")
+                                if (answer != null) {
+                                    // The browser's own view of the answer it produced; compare it
+                                    // with the SDP-derived summary in rtc-answer when they differ.
+                                    Log.i(
+                                        "WheelPlayWeb",
+                                        "rtc-diag id=$rtcId answer media=${answer.optString("media", "none")} " +
+                                            "codecs=${answer.optString("codecs", "none").take(200)} " +
+                                            "setup=${answer.optString("setup", "none")} " +
+                                            "candidates=${answer.optString("candidates", "none")}",
+                                    )
+                                }
+                                val codecs = data.optJSONArray("codecs")
+                                val list =
+                                    (0 until (codecs?.length() ?: 0))
+                                        .mapNotNull { codecs?.optString(it)?.takeIf(String::isNotEmpty) }
+                                val viewport = data.optString("viewport", "0x0")
+                                if (data.has("hasPc")) {
+                                    // A capability snapshot; the answer summary above omits these.
+                                    rtcDiagnostics =
+                                        "hasPc=${if (data.optBoolean("hasPc")) 1 else 0} " +
+                                            "hasRvfc=${if (data.optBoolean("hasRvfc")) 1 else 0} " +
+                                            "hasStats=${if (data.optBoolean("hasStats")) 1 else 0} " +
+                                            "dpr=${data.optDouble("dpr", 0.0)} vp=$viewport " +
+                                            "screen=${data.optString("screen", "0x0")}"
+                                    Log.i(
+                                        "WheelPlayWeb",
+                                        "rtc-diag id=$rtcId $rtcDiagnostics " +
+                                            "codecs=[${list.joinToString(" | ")}] " +
+                                            "ua=${data.optString("ua").take(120)}",
+                                    )
+                                }
                             }
                         }
                     "rtc-feedback" ->
@@ -735,7 +833,34 @@ internal class LanWebServer(
                             }
                         }
                     "rtc-fallback" ->
-                        synchronized(rtcLock) { if (data.getLong("id") == rtcId) stopRtc() }
+                        synchronized(rtcLock) {
+                            if (data.getLong("id") == rtcId) {
+                                val reason = data.optString("reason", "unspecified").take(48)
+                                // A rejected media section plus a Main/High profile is the only
+                                // evidence that would justify the transcoding path; log it apart.
+                                // codec-rejected never sends an answer, so the offer is the source.
+                                val profile = rtcAnswer ?: rtcOffer
+                                val profileMismatch =
+                                    reason == "codec-rejected" &&
+                                        profile?.mainOrHighProfile == true
+                                Log.i(
+                                    "WheelPlayWeb",
+                                    "rtc-fallback id=$rtcId reason=$reason " +
+                                        "codec=${rtcConfig?.codec?.name ?: "none"} " +
+                                        "profile=${profile?.profileLevelId ?: "none"}" +
+                                        (if (profileMismatch) " profile-mismatch" else "") +
+                                        " t=${SystemClock.elapsedRealtime()}",
+                                )
+                                if (reason == "codec-unsupported" && rtcConfig?.codec == VideoCodec.H265) {
+                                    // The iPhone, not the service, picks the codec. Remember the
+                                    // answer so the same session stops re-offering HEVC and the
+                                    // status line asks for the setting to change instead.
+                                    hevcSupported = false
+                                    rtcHint = "hevc-unsupported"
+                                }
+                                stopRtc()
+                            }
+                        }
                     "touch" -> {
                         val contacts = data.getJSONArray("contacts")
                         require(contacts.length() <= 2)

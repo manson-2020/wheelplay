@@ -9,7 +9,7 @@ const source = readFileSync(new URL('../common/src/main/assets/web/text.js', imp
   .replace(/^import .*text\.js';$/m, '').replaceAll('export function', 'function') + '\n' +
   readFileSync(new URL('../common/src/main/assets/web/app.js', import.meta.url), 'utf8')
     .replace(/^import .*browser-audio\.js';$/m, '').replace(/^import .*text\.js';$/m, '').replaceAll('export function', 'function');
-function fixture({ storedCanvas = null, storageDisabled = false, canvasAvailable = true,
+function fixture({ storedCanvas = null, storageDisabled = false, canvasAvailable = true, peerAvailable = true, search = '',
   fullscreen = 'supported', codeDenied = false, resume = () => ({ token: 'session-token', name: 'Chrome' }) } = {}) {
   const elements = new Map(), timers = new Map(), raf = new Map(), sockets = [], peers = [], draws = [];
   const preferences = new Map(storedCanvas === null ? [] : [['wheelplay.canvasVideo', storedCanvas]]);
@@ -64,8 +64,8 @@ function fixture({ storedCanvas = null, storageDisabled = false, canvasAvailable
       removeItem(key) { preferences.delete(key); },
     },
   },
-    location: { host: 'server:8080' }, URL: { createObjectURL: () => 'blob:frame', revokeObjectURL() {} }, Date, WebSocket: Socket,
-    RTCPeerConnection: Peer, performance: { now: () => 0 },
+    location: { host: 'server:8080', search }, URL: { createObjectURL: () => 'blob:frame', revokeObjectURL() {} }, Date, WebSocket: Socket,
+    RTCPeerConnection: peerAvailable ? Peer : undefined, performance: { now: () => 0 },
     setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
     clearTimeout(id) { timers.delete(id); }, setInterval() { return 0; }, clearInterval() {},
     requestAnimationFrame(fn) { const frame = ++nextFrame; raf.set(frame, fn); return frame; },
@@ -371,4 +371,23 @@ test('a WebRTC retry that falls back over a live JPEG stream never flickers the 
   f.element('video').onerror();
   assert.ok(ws.sent.some(m => m.type === 'rtc-fallback'), 'the client reports the fallback');
   assert.equal(f.element('waiting').hidden, true, 'the overlay stays hidden because the JPEG stream kept the picture live');
+});
+
+test('a browser without RTCPeerConnection never requests an offer', async () => {
+  const f = fixture({ peerAvailable: false }), ws = await f.connect();
+  ws.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true, rtcAvailable: true }) });
+  assert.equal(ws.sent.some(m => m.type === 'rtc-start'), false);
+});
+
+test('?diag=1 names the WebRTC stage on the status line and ?unhide=1 keeps a layout box', async () => {
+  const f = fixture({ search: '?diag=1&unhide=1' }), ws = await f.connect();
+  ws.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true, rtcDiag: 'hasPc=1 hasRvfc=1' }) });
+  assert.match(f.element('status').textContent, /WebRTC: hasPc=1 hasRvfc=1/);
+  ws.onmessage({ data: JSON.stringify({ type: 'rtc-offer', id: 1, sdp: 'offer' }) });
+  assert.equal(f.element('video').hidden, false);
+  assert.equal(f.element('video').classList.contains('pending-video'), true);
+  assert.equal(f.element('video').classList.contains('offscreen-video'), false);
+  const hidden = fixture(), hiddenWs = await hidden.connect();
+  hiddenWs.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true, rtcDiag: 'hasPc=1' }) });
+  assert.doesNotMatch(hidden.element('status').textContent, /WebRTC:/);
 });

@@ -483,6 +483,7 @@
     <string name="web_connected_waiting_for_video">Connected · Waiting for video</string>
     <string name="web_waiting_for_iphone_video">Waiting for iPhone video…</string>
     <string name="web_fallback">" · Fallback"</string>
+    <string name="web_disable_hevc_to_use_webrtc_on_this_head_unit">Turn off HEVC in WheelPlay settings to use WebRTC on this head unit</string>
     <string name="web_transport_touch_connected">%1$s%2$s · Touch connected</string>
     <string name="web_waiting_for_recovery">" · Waiting for recovery"</string>
     <string name="web_connected_waiting_for_iphone_video">Connected · Waiting for iPhone video</string>
