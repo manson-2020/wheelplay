@@ -30,6 +30,7 @@ internal enum class ChoiceSetting {
     RESOLUTION,
     FPS,
     STREAM,
+    IMAGE_FORMAT,
     RECOVERY,
     AUDIO_BUFFER,
     AUDIO_OUTPUT,
@@ -53,6 +54,7 @@ internal enum class ToggleSetting {
 }
 
 internal enum class TextSetting {
+    IMAGE_QUALITY,
     OEM_NAME,
     SSID,
     PASSWORD,
@@ -90,6 +92,7 @@ internal data class SettingsState(
     val category: SettingsCategory? = null,
     val choices: Map<ChoiceSetting, Int> = emptyMap(),
     val toggles: Map<ToggleSetting, Boolean> = emptyMap(),
+    val imageQuality: Int = com.shilapi.xcertplay.web.ImageEncodingOptions.DEFAULT_QUALITY,
     val phoneName: String = "",
     val manufacturer: String = "",
     val iconPath: String? = null,

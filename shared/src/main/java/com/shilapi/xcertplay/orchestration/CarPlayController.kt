@@ -394,6 +394,9 @@ class CarPlayController(
         }
     }
 
+    val touchReady: Boolean
+        get() = !closed && activeSession?.touchReady == true
+
     override fun close() {
         synchronized(this) {
             if (closed) return

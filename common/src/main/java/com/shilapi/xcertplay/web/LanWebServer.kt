@@ -40,6 +40,8 @@ internal class LanWebServer(
     private val enrolled = mutableMapOf<String, RememberedBrowsers.Credential>()
     val hasViewer
         get() = viewer != null
+    val imageFormat
+        get() = viewer?.imageFormat ?: ImageFormat.JPEG
 
     fun frameAvailable() {
         viewer?.frameAvailable()
@@ -368,6 +370,12 @@ internal class LanWebServer(
 
     private inner class Client(handshake: IHTTPSession) : WebSocket(handshake) {
         private val token = handshake.parameters["token"]?.firstOrNull()?.takeIf { it.isNotEmpty() }
+        private val mediaVersion = handshake.parameters["media"]?.firstOrNull()?.toIntOrNull()?.takeIf { it in 2..3 } ?: 1
+        private val imageProtocol = if (mediaVersion == 2 && handshake.parameters["images"]?.firstOrNull() == "3") 3 else mediaVersion
+        private val versionedMedia = imageProtocol >= 2
+        @Volatile var imageFormat = ImageFormat.JPEG
+            private set
+        private var imageFallback = false
 
         fun authorized() = token == null || pairing.authorized(token)
 
@@ -387,19 +395,23 @@ internal class LanWebServer(
                             !closing.get() &&
                             WebSession.videoSource?.jpegNeeded != false
                     )
-                        WebSession.frame
+                        WebSession.frame?.takeIf { it.format == ImageFormat.JPEG ||
+                            imageProtocol == 3 && imageFormat == ImageFormat.WEBP &&
+                                com.shilapi.xcertplay.AirPlayPersistence.loadImageFormat(context) == ImageFormat.WEBP }
                     else null
                 },
                 write = { super.sendFrame(it) },
                 onFailure = {
                     disconnect(context.getString(UiR.string.ui_streaming_connection_interrupted))
                 },
+                versionedVideo = versionedMedia,
+                imageProtocol = imageProtocol,
             )
         private val rtcLock = Any()
         private var rtcSource: WebVideoSource? = null
         private var rtcConfig: WebVideoSource.Config? = null
         private var rtc: RtcVideoStream? = null
-        private var rtcAttempted = false
+        private val rtcRetry = RtcRetryPolicy()
         private var rtcId = 0L
         private var rtcAnswered = false
         // Stage-tagged WebRTC evidence: head units have no reachable console, so the phone keeps
@@ -422,7 +434,7 @@ internal class LanWebServer(
                     // WebRTC attempt. Log it so the head-unit retry cadence is visible from the
                     // Android host logcat without a browser console; a repeated cadence here is the
                     // "flicker every so often" the Tesla browser reports.
-                    if (rtcAttempted) {
+                    if (rtcRetry.attempted) {
                         Log.i(
                             "WheelPlayWeb",
                             "rtc-attempt re-armed t=${SystemClock.elapsedRealtime()} " +
@@ -432,14 +444,15 @@ internal class LanWebServer(
                     stopRtc()
                     rtcSource = source
                     rtcConfig = source?.config
-                    rtcAttempted = false
+                    rtcRetry.reset()
                 }
             }
 
-        private fun stopRtc() =
+        private fun stopRtc(retryable: Boolean = true) =
             synchronized(rtcLock) {
                 val old = rtc
                 rtc = null
+                rtcRetry.finish(retryable)
                 if (old != null) {
                     rtcSource?.detach(old)
                     old.close()
@@ -451,23 +464,27 @@ internal class LanWebServer(
                 sender.frameAvailable()
             }
 
-        private fun startRtc() =
+        private fun startRtc() {
+            // Service stop holds WebSession before closing clients. Never acquire that monitor
+            // while holding rtcLock; carry a coherent snapshot and validate its source identity.
+            val media = WebSession.mediaSnapshot()
             synchronized(rtcLock) {
                 reconcileVideo()
-                if (rtcAttempted || ended.get() || !WebSession.videoActive) return
+                if (rtc != null || !rtcRetry.available || ended.get() || !WebSession.videoActive) return
                 val source = rtcSource ?: return
                 val config = rtcConfig ?: return
+                if (media.source !== source || media.sourceState == "stopped") return
                 if (config.codec == VideoCodec.H265 && !hevcSupported) {
                     // The browser already reported that it cannot decode HEVC; the iPhone, not the
                     // service, chooses the codec, so keep JPEG and ask for the setting to change.
                     rtcHint = "hevc-unsupported"
-                    // Counts as attempted so `rtcAvailable` turns false: otherwise the head unit
-                    // keeps offering and the 15 s watchdog would overwrite this hint.
-                    rtcAttempted = true
+                    // Block retries so `rtcAvailable` turns false: otherwise the head unit keeps
+                    // offering and the 15 s watchdog would overwrite this hint.
+                    rtcRetry.block()
                     return
                 }
+                if (!rtcRetry.start()) return
                 rtcHint = null
-                rtcAttempted = true
                 rtcAnswered = false
                 rtcAnswer = null
                 rtcOffer = null
@@ -501,6 +518,8 @@ internal class LanWebServer(
                                         JSONObject()
                                             .put("type", "rtc-offer")
                                             .put("id", id)
+                                            .put("sessionId", media.sessionId)
+                                            .put("videoEpoch", media.videoEpoch)
                                             .put("codec", config.codec.name)
                                             .put("recoveryGraceMs", recovery.graceMs)
                                             .put("sdp", sdp)
@@ -508,7 +527,7 @@ internal class LanWebServer(
                                     )
                             }
                         },
-                        failure = { synchronized(rtcLock) { if (rtcId == id) stopRtc() } },
+                        failure = { retryable -> synchronized(rtcLock) { if (rtcId == id) stopRtc(retryable) } },
                     )
                 rtc = stream
                 if (!source.attach(stream, config)) {
@@ -517,6 +536,7 @@ internal class LanWebServer(
                 }
                 stream.start()
             }
+        }
 
         private fun reply(
             kind: WebStreamSender.Control,
@@ -669,7 +689,17 @@ internal class LanWebServer(
                                 )
                             }
                         }
-                    "ack" -> sender.acknowledge()
+                    "ack" -> if (imageProtocol == 3) sender.acknowledge(
+                        data.getLong("sessionId"), data.getLong("videoEpoch"), data.getLong("sequence"))
+                        else sender.acknowledge()
+                    "image-format" -> if (imageProtocol == 3) {
+                        when (data.getString("format")) {
+                            "webp" -> if (!imageFallback) imageFormat = ImageFormat.WEBP
+                            "jpeg" -> { imageFallback = true; imageFormat = ImageFormat.JPEG }
+                            else -> error("Unsupported image format")
+                        }
+                        sender.frameAvailable()
+                    }
                     "viewport" -> {
                         val width = data.getInt("width")
                         val height = data.getInt("height")
@@ -684,11 +714,15 @@ internal class LanWebServer(
                             )
                             lastLiveTransitions = transitions
                         }
+                        // Match service-stop lock ordering: take the session snapshot first.
+                        val media = WebSession.mediaSnapshot()
                         reconcileVideo()
-                        val frame = WebSession.frame
                         synchronized(rtcLock) {
+                            val frame = media.frame
+                            val mediaRtc = rtc.takeIf { rtcSource === media.source }
                             val rtcAvailable =
-                                rtcConfig != null && !rtcAttempted && WebSession.videoActive &&
+                                mediaRtc == null && rtcSource === media.source && rtcConfig != null &&
+                                    rtcRetry.available && media.sourceState == "ready" &&
                                     !WebSession.localDisplayActive
                             if (rtcAvailable) {
                                 val at = SystemClock.elapsedRealtime()
@@ -709,8 +743,13 @@ internal class LanWebServer(
                                 WebStreamSender.Control.STATUS,
                                 JSONObject()
                                     .put("type", "status")
-                                    .put("width", WebSession.width)
-                                    .put("height", WebSession.height)
+                                    .put("width", media.width)
+                                    .put("height", media.height)
+                                    .put("mediaProtocol", imageProtocol.coerceAtLeast(2))
+                                    .put("sessionId", media.sessionId)
+                                    .put("videoEpoch", media.videoEpoch)
+                                    .put("sourceState", media.sourceState)
+                                    .put("inputReady", media.inputReady)
                                     .put(
                                         "stage",
                                         if (WebSession.localDisplayActive) context.getString(UiR.string.web_displayed_on_phone)
@@ -719,15 +758,17 @@ internal class LanWebServer(
                                     .put(
                                         "streaming",
                                         !WebSession.localDisplayActive &&
-                                            WebSession.videoActive &&
+                                            media.sourceState == "ready" &&
                                             (frame != null ||
-                                                rtc?.connected == true ||
-                                                rtc?.holdingFrame == true),
+                                                mediaRtc?.connected == true ||
+                                                mediaRtc?.holdingFrame == true),
                                     )
                                     .put("rtcAvailable", rtcAvailable)
                                     .put("rtcHint", rtcHint ?: "")
                                     .put("rtcDiag", rtcDiagnostics ?: "")
-                                    .put("rtcFrames", rtc?.sentFrames ?: 0)
+                                    .put("rtcRetryAfterMs", rtcRetry.retryAfterMs)
+                                    .put("rtcRetryBlocked", rtcRetry.blocked)
+                                    .put("rtcFrames", mediaRtc?.sentFrames ?: 0)
                                     .put(
                                         "performance",
                                         JSONObject()
@@ -735,7 +776,10 @@ internal class LanWebServer(
                                                 "source",
                                                 rtcSource?.performanceSnapshot()?.let(::JSONObject),
                                             )
-                                            .put("transport", rtc?.snapshot()?.let(::JSONObject)),
+                                            .put("transport", rtc?.snapshot()?.let(::JSONObject))
+                                            .put("image", JSONObject(sender.imageSnapshot())
+                                                .put("format", media.frame?.format?.mime)
+                                                .put("quality", media.frame?.quality)),
                                     )
                                     .put(
                                         "transport",
@@ -744,7 +788,7 @@ internal class LanWebServer(
                                     .put(
                                         "fallback",
                                         rtcSource?.technology == StreamTechnology.WEBRTC &&
-                                            (rtcAttempted && rtc == null || rtcConfig == null),
+                                            (rtcRetry.attempted && rtc == null || rtcConfig == null),
                                     )
                                     .toString(),
                             )
@@ -829,12 +873,14 @@ internal class LanWebServer(
                         synchronized(rtcLock) {
                             if (data.getLong("id") == rtcId) {
                                 rtc?.displayed()
+                                if (rtc?.holdingFrame == true) rtcRetry.ready()
                                 sender.acknowledge()
                             }
                         }
                     "rtc-fallback" ->
                         synchronized(rtcLock) {
                             if (data.getLong("id") == rtcId) {
+                                val retryable = data.optBoolean("retryable", true)
                                 val reason = data.optString("reason", "unspecified").take(48)
                                 // A rejected media section plus a Main/High profile is the only
                                 // evidence that would justify the transcoding path; log it apart.
@@ -845,7 +891,7 @@ internal class LanWebServer(
                                         profile?.mainOrHighProfile == true
                                 Log.i(
                                     "WheelPlayWeb",
-                                    "rtc-fallback id=$rtcId reason=$reason " +
+                                    "rtc-fallback id=$rtcId reason=$reason retryable=$retryable " +
                                         "codec=${rtcConfig?.codec?.name ?: "none"} " +
                                         "profile=${profile?.profileLevelId ?: "none"}" +
                                         (if (profileMismatch) " profile-mismatch" else "") +
@@ -858,7 +904,7 @@ internal class LanWebServer(
                                     hevcSupported = false
                                     rtcHint = "hevc-unsupported"
                                 }
-                                stopRtc()
+                                stopRtc(retryable)
                             }
                         }
                     "touch" -> {
@@ -874,7 +920,10 @@ internal class LanWebServer(
                                     point.getBoolean("down"),
                                 )
                             }
-                        if (!WebSession.touch.touch(this, list, lastSeen)) {
+                        val accepted = if (versionedMedia) WebSession.mediaTouch(this,
+                            data.optLong("sessionId", -1), data.optLong("videoEpoch", -1), list, lastSeen)
+                        else WebSession.touch.touch(this, list, lastSeen)
+                        if (!accepted) {
                             reply(
                                 WebStreamSender.Control.INPUT_UNAVAILABLE,
                                 """{"type":"input-unavailable"}""",
