@@ -9,6 +9,8 @@ import com.shilapi.xcertplay.shared.R as UiR
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoWSD
 import java.io.IOException
+import java.io.InputStream
+import java.net.Socket
 import java.net.URI
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -357,6 +359,20 @@ internal class LanWebServer(
 
     override fun openWebSocket(handshake: IHTTPSession): WebSocket = Client(handshake)
 
+    /**
+     * NanoHTTPD never exposes the accepted socket, but ICE must answer from the address this
+     * client actually reached. The handler thread is also the thread that serves the handshake.
+     */
+    private val connectionAddress = ThreadLocal<String?>()
+
+    override fun createClientHandler(clientSocket: Socket, input: InputStream?): ClientHandler =
+        object : ClientHandler(input, clientSocket) {
+            override fun run() {
+                connectionAddress.set(runCatching { clientSocket.localAddress?.hostAddress }.getOrNull())
+                try { super.run() } finally { connectionAddress.remove() }
+            }
+        }
+
     override fun stop() = stopListener(clearPairing = true)
 
     fun stopPreservingPairing() = stopListener(clearPairing = false)
@@ -378,7 +394,7 @@ internal class LanWebServer(
         private var imageFallback = false
         // The address this browser reached us on; ICE must answer from it. VPN aliases such as
         // the Tesla compatibility address are local but not on the hotspot interface.
-        private val rtcBindAddress = RtcBindAddress.forHost(handshake.headers["host"])
+        private val rtcBindAddress = RtcBindAddress.forAddress(connectionAddress.get())
 
         fun authorized() = token == null || pairing.authorized(token)
 
@@ -422,6 +438,7 @@ internal class LanWebServer(
         private var rtcAnswer: RtcSdpSummary.Summary? = null
         private var rtcOffer: RtcSdpSummary.Summary? = null
         private var rtcDiagnostics: String? = null
+        private var rtcFallbackStates: String? = null
         private var rtcHint: String? = null
         private var hevcSupported = true
         private var rtcAvailableSince = 0L
@@ -492,6 +509,7 @@ internal class LanWebServer(
                 rtcAnswer = null
                 rtcOffer = null
                 rtcDiagnostics = null
+                rtcFallbackStates = null
                 rtcAvailableSince = 0L
                 rtcNotRequested = false
                 val id = ++rtcId
@@ -770,7 +788,15 @@ internal class LanWebServer(
                                     )
                                     .put("rtcAvailable", rtcAvailable)
                                     .put("rtcHint", rtcHint ?: "")
-                                    .put("rtcDiag", rtcDiagnostics ?: "")
+                                    .put(
+                                        "rtcDiag",
+                                        listOfNotNull(
+                                            rtcBindAddress?.let { "bind=$it" },
+                                            rtcDiagnostics,
+                                            rtcFallbackStates,
+                                            rtcOffer?.profileLevelId?.let { "profile=$it" },
+                                        ).joinToString(" "),
+                                    )
                                     .put("rtcRetryAfterMs", rtcRetry.retryAfterMs)
                                     .put("rtcRetryBlocked", rtcRetry.blocked)
                                     .put("rtcFrames", mediaRtc?.sentFrames ?: 0)
@@ -901,12 +927,21 @@ internal class LanWebServer(
                                 val profileMismatch =
                                     reason == "codec-rejected" &&
                                         profile?.mainOrHighProfile == true
+                                // Only a first-frame timeout carries peer states; they separate an ICE
+                                // that never completed from a stream that arrived but never decoded.
+                                rtcFallbackStates = listOfNotNull(
+                                    data.optString("conn").takeIf(String::isNotEmpty)?.let { "conn=$it" },
+                                    data.optString("ice").takeIf(String::isNotEmpty)?.let { "ice=$it" },
+                                    data.optString("gather").takeIf(String::isNotEmpty)?.let { "gather=$it" },
+                                    if (data.optInt("track", 0) == 1) "track=1" else null,
+                                ).joinToString(" ").takeIf { it.isNotEmpty() }
                                 Log.i(
                                     "WheelPlayWeb",
                                     "rtc-fallback id=$rtcId reason=$reason retryable=$retryable " +
                                         "codec=${rtcConfig?.codec?.name ?: "none"} " +
                                         "profile=${profile?.profileLevelId ?: "none"}" +
                                         (if (profileMismatch) " profile-mismatch" else "") +
+                                        (rtcFallbackStates?.let { " $it" } ?: "") +
                                         " t=${SystemClock.elapsedRealtime()}",
                                 )
                                 if (reason == "codec-unsupported" && rtcConfig?.codec == VideoCodec.H265) {

@@ -53,10 +53,11 @@ WebSocket 控制连接的心跳与重连规则独立于视频策略；整个网�
 
 ## ICE 绑定地址
 
-WebRTC 的 ICE socket 绑定到浏览器实际访问的本地 IPv4 地址（握手 `Host` 头且属于本机接口），
-而不是默认的任意地址。这样兼容地址（如免 Root VPN 的 `6.6.6.6`）的 STUN 回包源地址与车机
+WebRTC 的 ICE socket 绑定到本次 WebSocket 连接在本机的 IPv4 地址（从已接受的 socket 读取，
+用域名访问时同样有效；环回 / 链路本地地址不算），而不是默认的任意地址。这样兼容地址（如免 Root VPN 的 `6.6.6.6`）的 STUN 回包源地址与车机
 发送目标一致，避免回包从热点地址发出而被丢弃。地址不是本机接口、为环回 / 链路本地或
-绑定失败时保持任意地址，行为与旧版相同。日志中的 `bind=..` 记录本次选择；仍需在目标
+绑定失败时保持任意地址，行为与旧版相同。`?diag=1` 状态行与 `rtc-offer` 日志都会记录 `bind=<地址|any>`；
+`first-frame-timeout` 还会附带 `conn` / `ice` / `gather` / `track` 与 offer 的 `profile=`。仍需在目标
 车机上验证 UDP 可达性。
 
 ## 失败归因（reason / rtc-diag）
@@ -71,7 +72,7 @@ WebRTC 的 ICE socket 绑定到浏览器实际访问的本地 IPv4 地址（握�
 | `offer:*` / `answer:*` | `setRemoteDescription` / answer 生成抛错 | 按 `err.name` 决定是否净化 SDP |
 | `local-desc:*` | DTLS 角色改写后 `setLocalDescription` 抛错 | 已自动用原始 `a=setup:active` 重试一次 |
 | `gathering-timeout` 相关 | 候选收集 3 秒未 complete | 已改为到时发送已收集候选，不再等首帧超时 |
-| `first-frame-timeout` / `decode-error` / `play:*` | 解码或播放启动失败 | 用 `?unhide=1` 验证是否为隐藏 video 不解码 |
+| `first-frame-timeout` / `decode-error` / `play:*` | 解码或播放启动失败 | 用 `?unhide=1` 验证是否为隐藏 video 不解码；`first-frame-timeout` 会附带 `conn` / `ice` / `gather` / `track`，`conn` 停在 `checking` 是 ICE 未通，`conn=connected track=1` 才是解码问题 |
 | `decode-stall` / `stats-unavailable` | 解码不前进 / 取统计连续失败 | 网络与丢包排查 |
 | `connection:<state>` / `disconnect-timeout` | 连接终态 / 短暂断开超时 | 见上文容忍时间策略 |
 | `renderer-error` / `render-stalled` / `track-ended` / `track-replaced` | 渲染器报错、画面不再更新、轨道结束或被替换 | 换一个视频渲染器对比；`render-stalled` 时检查绘制路径而不是网络 |
@@ -81,7 +82,7 @@ WebRTC 的 ICE socket 绑定到浏览器实际访问的本地 IPv4 地址（握�
 
 - `rtc-offer id=.. codec=.. bind=<地址|any> media=video:9 codecs=<rtpmap + fmtp> setup=actpass candidates=host:N,srflx:N,relay:N,mdns:N`
 - `rtc-answer id=.. ...`（同上；`media=video:0` 即被拒）
-- `rtc-fallback id=.. reason=.. retryable=.. codec=.. profile=.. [profile-mismatch] t=..`
+- `rtc-fallback id=.. reason=.. retryable=.. codec=.. profile=.. [profile-mismatch] [conn=.. ice=.. gather=.. track=1] t=..`（只有 `first-frame-timeout` 会带 peer 状态）
 - `rtc-diag id=.. hasPc=1 hasRvfc=1 hasStats=1 dpr=.. vp=.. screen=.. codecs=[..] ua=..`
 - `rtc-diag id=.. answer media=video:9 codecs=<rtpmap + fmtp> setup=passive candidates=host:N,srflx:N,relay:N,mdns:N`（网页端视角）
 - `rtc-not-requested waited=..ms codec=..`（能力可见但浏览器从未请求）

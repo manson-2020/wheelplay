@@ -52,6 +52,15 @@ test('missing WebRTC and first-frame timeout both fall back without closing the 
   assert.equal(f.pc.closed, true); assert.equal(f.stopped, 1);
 });
 
+test('a first-frame timeout names the peer states so ICE and decode failures differ', async () => {
+  const f = fixture();
+  f.pc.connectionState = 'checking'; f.pc.iceConnectionState = 'checking';
+  await f.receiver.receive({ type: 'rtc-offer', id: 5, sdp: 'offer' });
+  await f.tick(10000, 10000);
+  assert.deepEqual(f.sent.at(-1), { type: 'rtc-fallback', id: 5, reason: 'first-frame-timeout',
+    conn: 'checking', ice: 'checking', gather: 'complete' });
+});
+
 test('autoplay and unsupported platform errors block retries, while transient setup errors remain retryable', async () => {
   for (const name of ['NotAllowedError', 'NotSupportedError', 'OperationError']) {
     const f = fixture();

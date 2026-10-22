@@ -535,8 +535,15 @@ export function createRtcReceiver(createRenderer, {
     let codecs = [];
     try {
       if (typeof RTCRtpReceiver !== 'undefined' && RTCRtpReceiver.getCapabilities) {
-        codecs = (RTCRtpReceiver.getCapabilities('video') || {}).codecs || [];
-        codecs = codecs.slice(0, 12).map(entry => `${entry.mimeType}${entry.sdpFmtpLine ? ` ${entry.sdpFmtpLine}` : ''}`.slice(0, 96));
+        const all = (RTCRtpReceiver.getCapabilities('video') || {}).codecs || [];
+        // One entry per mime: Chrome lists every H.264 profile separately, which used to push
+        // H265/AV1 out of the 12-entry window and made the diag line look incomplete.
+        const seen = new Set();
+        codecs = all.filter(entry => {
+          const mime = String(entry.mimeType || '').toLowerCase();
+          if (!mime || seen.has(mime)) return false;
+          seen.add(mime); return true;
+        }).slice(0, 12).map(entry => `${entry.mimeType}${entry.sdpFmtpLine ? ` ${entry.sdpFmtpLine}` : ''}`.slice(0, 96));
       }
     } catch (_) { codecs = []; }
     const snapshot = {
@@ -568,8 +575,14 @@ export function createRtcReceiver(createRenderer, {
     const current = id;
     if (current === null) return;
     lastReason = reason;
+    // A first-frame timeout is ambiguous on a head unit: name the peer states before close() so
+    // the phone can tell an ICE that never completed from a stream that arrived but never decoded.
+    const states = reason === 'first-frame-timeout' && peer
+      ? { conn: peer.connectionState, ice: peer.iceConnectionState, gather: peer.iceGatheringState,
+          ...(track ? { track: 1 } : {}) }
+      : {};
     close(); onStop(reason);
-    send({ type: 'rtc-fallback', id: current, reason, ...(retryable ? {} : { retryable: false }) });
+    send({ type: 'rtc-fallback', id: current, reason, ...states, ...(retryable ? {} : { retryable: false }) });
   }
   async function receive(message) {
     if (message.type === 'rtc-stop') {
@@ -590,6 +603,9 @@ export function createRtcReceiver(createRenderer, {
       const displayed = size => {
         if (!current() || ready || !size.width || !size.height) return;
         ready = true; cancel(timeout); timeout = null;
+        // The last failed attempt stays visible while retrying, but a working stream must not
+        // keep showing that old reason next to its own fps.
+        lastReason = null;
         lastDecoded = 0; sent = 0; sentAtLastProgress = 0; lastSentAt = now();
         lastRendered = renderer?.snapshot().renderedFrames ?? 0;
         send({ type: 'rtc-ready', id }); onReady(size);
