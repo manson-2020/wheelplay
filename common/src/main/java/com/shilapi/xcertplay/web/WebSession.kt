@@ -208,13 +208,20 @@ internal object WebSession {
         refreshAppearance(context)
     }
 
-    fun refreshAppearance(context: Context) {
+    fun refreshAppearance(context: Context) =
+        refreshAppearance(context, isDarkMode(context.resources.configuration.uiMode))
+
+    /**
+     * Pushes the resolved night mode to the connected iPhone. Callers holding an authoritative
+     * [Configuration] (a live onConfigurationChanged) must pass [systemNight] from it rather than
+     * rely on [Context.resources], whose configuration can lag the new value at callback time and
+     * would otherwise push the previous appearance back to the phone.
+     */
+    fun refreshAppearance(context: Context, systemNight: Boolean) {
         val controller = CarPlayBackgroundSession.snapshot()?.controller ?: return
         preferenceExecutor.execute {
             if (CarPlayBackgroundSession.snapshot()?.controller === controller) {
-                val night =
-                    AirPlayPersistence.loadAppearance(context)
-                        .night(isDarkMode(context.resources.configuration.uiMode))
+                val night = AirPlayPersistence.loadAppearance(context).night(systemNight)
                 controller.setNightMode(night)
             }
         }

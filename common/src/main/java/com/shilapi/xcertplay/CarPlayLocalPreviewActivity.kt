@@ -2,6 +2,7 @@
 package com.shilapi.xcertplay
 
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
@@ -47,6 +48,7 @@ class CarPlayLocalPreviewActivity : ComponentActivity() {
     private var sessionSubscription: AutoCloseable? = null
     private var loadingOverlay: View? = null
     private var touchOutsideContent = false
+    private var lastNightMode: Boolean? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -117,6 +119,22 @@ class CarPlayLocalPreviewActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // This preview is the foreground screen while CarPlay is shown on the phone, so it owns the
+        // follow-Android push: the host activity is stopped behind here and would not receive a live
+        // onConfigurationChanged. Re-apply the current theme on entry (it may have moved while this
+        // screen was paused) and keep lastNightMode as the dedup baseline for later flips.
+        lastNightMode = isDarkMode(resources.configuration.uiMode)
+        WebSession.refreshAppearance(this, lastNightMode == true)
+        goImmersive()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val night = isDarkMode(newConfig.uiMode)
+        if (night != lastNightMode) {
+            lastNightMode = night
+            WebSession.refreshAppearance(this, night)
+        }
         goImmersive()
     }
 
