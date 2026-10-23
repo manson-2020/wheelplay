@@ -76,6 +76,18 @@ test('the media session probe forwards actions and applies server metadata', () 
   assert.equal(createMediaSessionProbe({ send() {}, session: null }).available, false);
 });
 
+test('the media card is labelled even when key forwarding stays off', () => {
+  const handlers = {};
+  const session = { metadata: null, playbackState: '', setActionHandler: (name, fn) => { handlers[name] = fn; } };
+  const probe = createMediaSessionProbe({ session, send() {}, handlers: false });
+  assert.deepEqual(Object.keys(handlers), []);
+  probe.apply({ title: '歌名', artist: '歌手', artwork: 'data:image/jpeg;base64,AAA' });
+  assert.equal(session.metadata.title, '歌名');
+  assert.equal(session.metadata.artwork[0].src, 'data:image/jpeg;base64,AAA');
+  // Only a key-forwarding session claims to be playing, so a silent label never fakes state.
+  assert.equal(session.playbackState, '');
+});
+
 test('the page forwards the action it is given and never claims to be paused', () => {
   const handlers = {}, sent = [];
   const session = { metadata: null, playbackState: '', setActionHandler: (name, fn) => { handlers[name] = fn; } };

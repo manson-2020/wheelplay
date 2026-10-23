@@ -296,9 +296,12 @@ export function createControlOutbox(socket, {
 // the tab that owns the platform media session, so this registers the handlers and reports every
 // action back over the control socket: the phone log then separates "the key never reached the
 // page" from "the page got it but the rest of the chain failed". No playback control yet.
+// Publishes the head unit media card (title, artist, artwork) and, when keys are enabled, forwards
+// platform media keys over the control socket. Metadata is always published; `?ms=1` only adds the
+// action handlers, because forwarding a key is a behaviour change while a label is not.
 export function createMediaSessionProbe({
   session = typeof navigator !== 'undefined' ? navigator.mediaSession : null,
-  send, onAction = () => {}, now = () => Date.now(),
+  send, onAction = () => {}, now = () => Date.now(), handlers = true,
   actions = ['play', 'pause', 'nexttrack', 'previoustrack', 'seekbackward', 'seekforward'],
 } = {}) {
   if (!session || typeof session.setActionHandler !== 'function') {
@@ -313,8 +316,8 @@ export function createMediaSessionProbe({
         : fields;
       session.metadata = typeof MediaMetadata === 'function' ? new MediaMetadata(metadata) : metadata;
       // Chrome releases the platform session as soon as a page reports "paused", and the head unit
-      // then stops delivering the key, so the session always claims to be playing.
-      session.playbackState = 'playing';
+      // then stops delivering the key, so a key-forwarding session always claims to be playing.
+      if (handlers) session.playbackState = 'playing';
     } catch (_) {}
   }
   function apply(media = {}) {
@@ -327,8 +330,10 @@ export function createMediaSessionProbe({
   function press(action) {
     last = { action, at: now() }; onAction(action); send({ type: 'media', action }); publish();
   }
-  for (const action of actions) {
-    try { session.setActionHandler(action, () => press(action)); } catch (_) {}
+  if (handlers) {
+    for (const action of actions) {
+      try { session.setActionHandler(action, () => press(action)); } catch (_) {}
+    }
   }
   publish();
   return { available: true, apply, get last() { return last; } };
@@ -1107,8 +1112,11 @@ if (typeof document !== 'undefined') {
     },
   });
   document.addEventListener('pointerdown', () => browserAudio.unlock(), { capture: true });
-  const mediaProbe = mediaSessionMode
-    ? createMediaSessionProbe({ send, onAction: () => presentation.refresh() }) : null;
+  // Metadata is published even without `?ms`: the head unit media card is a label, not a behaviour
+  // change. Only the key handlers are gated, because forwarding a key changes what a button does.
+  const mediaProbe = createMediaSessionProbe({
+    send, onAction: () => presentation.refresh(), handlers: Boolean(mediaSessionMode),
+  });
   // Some embedded browsers surface hardware media keys as key events instead of media session
   // actions, so echo the last key code too; without it "no action" is ambiguous.
   let lastKeyCode = '';
