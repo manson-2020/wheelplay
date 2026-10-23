@@ -65,6 +65,7 @@ object AirPlayPersistence {
     private const val KEY_MAX_DETECTED_WIDTH = "display_max_detected_width"
     private const val KEY_MAX_DETECTED_HEIGHT = "display_max_detected_height"
     private const val KEY_RIGHT_HAND_DRIVE = "right_hand_drive"
+    private const val KEY_PHONE_STATUS_BADGE = "phone_status_badge"
     private const val KEY_HIDE_TOP_BAR = "hide_top_bar"
     private const val KEY_HIDE_BOTTOM_BAR = "hide_bottom_bar"
     private const val KEY_ADAPTIVE_BROWSER_SIZE = "adaptive_browser_size"
@@ -589,6 +590,17 @@ object AirPlayPersistence {
     fun saveRightHandDrive(context: Context, rightHandDrive: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_RIGHT_HAND_DRIVE, rightHandDrive)
+            .apply()
+    }
+
+    /** Opt-in: the head-unit corner badge showing this phone's battery and uplink. */
+    fun loadPhoneStatusBadge(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_PHONE_STATUS_BADGE, false)
+
+    fun savePhoneStatusBadge(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_PHONE_STATUS_BADGE, enabled)
             .apply()
     }
 

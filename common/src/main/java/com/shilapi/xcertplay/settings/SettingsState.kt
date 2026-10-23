@@ -47,6 +47,7 @@ internal enum class ToggleSetting {
     AUTO_START,
     KEEP_SCREEN_ON,
     ADAPTIVE_SIZE,
+    PHONE_STATUS_BADGE,
     HEVC,
     BLUETOOTH_AUDIO,
     RIGHT_HAND,

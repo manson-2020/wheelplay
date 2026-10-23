@@ -88,6 +88,8 @@
     <string name="settings_hevc_description">下次連線生效。需要瀏覽器支援 HEVC / WebRTC，否則回退 JPEG；關閉時使用 H.264。</string>
     <string name="settings_right_hand">右舵佈局</string>
     <string name="settings_right_hand_description">將 CarPlay 控制項移到右側。</string>
+    <string name="settings_phone_status_badge">手機電量與網路角標</string>
+    <string name="settings_phone_status_badge_description">在車機畫面上顯示一個圓形儀錶盤，包含本手機的電量、媒體音量以及 Wi-Fi 或蜂窩訊號。可拖曳至任意位置，雙擊回到右上角。CarPlay 狀態列只會顯示 iPhone 的狀態。</string>
     <string name="settings_safe_area_preview">畫面安全區域預覽</string>
     <string name="settings_safe_area_hint" formatted="false">高亮區域為 CarPlay 佈局區域。每邊 0–40%，0 表示不留白。</string>
     <string name="settings_margin_top">上邊留白</string>

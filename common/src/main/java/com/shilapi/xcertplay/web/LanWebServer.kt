@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
+import com.shilapi.xcertplay.AirPlayPersistence
 import com.shilapi.xcertplay.CarPlayBackgroundSession
 import com.shilapi.xcertplay.airplay.AirPlayContact
 import com.shilapi.xcertplay.airplay.VideoCodec
@@ -865,6 +866,23 @@ internal class LanWebServer(
                                         rtcSource?.technology == StreamTechnology.WEBRTC &&
                                             (rtcRetry.attempted && rtc == null || rtcConfig == null),
                                     )
+                                    .apply {
+                                        // Opt-in corner badge: the battery and the uplink of the phone that
+                                        // carries this stream. A missing key means "off", and the browser
+                                        // drops the badge on the next ping.
+                                        if (AirPlayPersistence.loadPhoneStatusBadge(context)) {
+                                            val phone = PhoneStatus.snapshot(context)
+                                            put(
+                                                "phone",
+                                                JSONObject()
+                                                    .put("battery", phone.battery)
+                                                    .put("charging", phone.charging)
+                                                    .put("volume", phone.volume)
+                                                    .put("network", phone.network)
+                                                    .put("bars", phone.bars),
+                                            )
+                                        }
+                                    }
                                     .toString(),
                             )
                         }

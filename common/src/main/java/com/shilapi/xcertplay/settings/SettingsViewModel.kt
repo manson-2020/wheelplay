@@ -108,6 +108,7 @@ internal class SettingsViewModel(
                     ToggleSetting.AUTO_START to AirPlayPersistence.loadAutoStartOnBoot(app),
                     ToggleSetting.KEEP_SCREEN_ON to DiPlayPreferences.keepScreenOn(app),
                     ToggleSetting.ADAPTIVE_SIZE to AirPlayPersistence.loadAdaptiveBrowserSize(app),
+                    ToggleSetting.PHONE_STATUS_BADGE to AirPlayPersistence.loadPhoneStatusBadge(app),
                     ToggleSetting.HEVC to AirPlayPersistence.loadHevcEnabled(app),
                     ToggleSetting.BLUETOOTH_AUDIO to AirPlayPersistence.loadBluetoothAudioPriority(app),
                     ToggleSetting.RIGHT_HAND to AirPlayPersistence.loadRightHandDrive(app),
@@ -271,6 +272,12 @@ internal class SettingsViewModel(
                 ToggleSetting.ADAPTIVE_SIZE -> {
                     AirPlayPersistence.saveAdaptiveBrowserSize(app, checked)
                     WebSession.setAdaptiveBrowserSize(checked)
+                    SettingsEffect.None
+                }
+                ToggleSetting.PHONE_STATUS_BADGE -> {
+                    AirPlayPersistence.savePhoneStatusBadge(app, checked)
+                    // The badge rides the browser's own status ping, so the next ping (400 ms) adds
+                    // or drops it without a reconnect.
                     SettingsEffect.None
                 }
                 ToggleSetting.HEVC -> {

@@ -142,6 +142,13 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
         R.string.settings_right_hand,
         R.string.settings_right_hand_description,
     )
+    SettingsToggle(
+        state,
+        actions,
+        ToggleSetting.PHONE_STATUS_BADGE,
+        R.string.settings_phone_status_badge,
+        R.string.settings_phone_status_badge_description,
+    )
     if (editMargins)
         SafeAreaDialog(margins ?: CarPlaySafeMargins(), { editMargins = false }) {
             actions.margins(it)

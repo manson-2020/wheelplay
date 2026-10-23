@@ -1,2 +1,4 @@
+# ffmpeg-static 的 install 脚本负责下载当前平台的 ffmpeg 二进制，
+# scripts/preview.mjs 与 scripts/test-media-presentation.mjs 都依赖它，因此必须放行。
 allowBuilds:
-  ffmpeg-static: set this to true or false
+  ffmpeg-static: true

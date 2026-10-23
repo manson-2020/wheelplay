@@ -68,12 +68,18 @@ server.on('upgrade',(req,socket,head) => {
 wss.on('connection',ws => {
   if (viewer) { ws.send(JSON.stringify({type:'busy',message:'已有车机连接，请先在另一台车机断开'}));ws.close();return; }
   viewer=ws;let ready=true;
+  // Corner-gauge fixtures: rotate through Wi-Fi, 5G, charging and the red low-battery state about
+  // every three seconds, which is how often the real server re-reads the phone. The last two entries
+  // cover the extremes the rotating states never hit: a full ring on both sides with a three-digit
+  // number, and a dead-quiet 0% volume with no signal at all.
+  const badges=[{battery:88,volume:64,network:'wifi',bars:3,charging:false},{battery:63,volume:100,network:'5g',bars:4,charging:true},{battery:14,volume:0,network:'4g',bars:2,charging:false},{battery:47,volume:38,network:'cellular',bars:1,charging:false},{battery:100,volume:100,network:'wifi',bars:4,charging:true},{battery:2,volume:0,network:'none',bars:0,charging:false}];
+  let pings=0;
   const timer=setInterval(()=>{if (ready && ws.readyState===1) {ready=false;ws.send(jpeg);}},100);
   ws.on('message',(data,isBinary)=>{
     if (isBinary) return;
     const msg=JSON.parse(data);
     if(msg.type==='ack')ready=true;
-    if(msg.type==='ping')ws.send(JSON.stringify({type:'status',width:1280,height:720,streaming:true,stage:'测试画面（非真实 CarPlay）'}));
+    if(msg.type==='ping')ws.send(JSON.stringify({type:'status',width:1280,height:720,streaming:true,stage:'测试画面（非真实 CarPlay）',phone:badges[Math.floor(pings++/8)%badges.length]}));
     if(msg.type==='touch'){touchReports.push(msg.contacts);touchReports=touchReports.slice(-100);}
   });
   ws.on('close',()=>{clearInterval(timer);if(viewer===ws)viewer=null;});

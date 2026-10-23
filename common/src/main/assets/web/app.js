@@ -832,6 +832,154 @@ export function createRtcReceiver(createRenderer, {
   };
 }
 
+// The status bar inside the picture belongs to the iPhone, so the server also reports this Android
+// phone: battery, media volume and the radio carrying the stream. One circular mark in the flat
+// three-ring style - uniform strokes, round caps, no gradients. Dark frosted glass with light strokes,
+// because the gauge floats over a night map far more often than over a daylight route, and a mid-grey
+// track is the only way the empty part of both rings stays readable on either. Icons and language-free
+// labels only, so nothing needs a translation.
+const phoneNetworks = ['wifi', '5g', '4g', '3g', '2g', 'cellular', 'eth', 'none'];
+// Every transport gets a word in the bottom opening - an empty notch reads as a broken gauge. The
+// fallbacks stay short: the opening between the arc caps only fits about five characters at this size.
+const phoneNetworkLabels = {
+  wifi: 'WIFI', '5g': '5G', '4g': '4G', '3g': '3G', '2g': '2G', cellular: 'NET', eth: 'LAN', none: 'OFF',
+};
+// Matches PhoneStatus.LOW_BATTERY_PERCENT; red is the driver-facing warning.
+const lowBatteryPercent = 20;
+// Light strokes on dark glass, but held back from pure white: #f2f5f7 measured 17.5:1 against a night
+// map, which stings, while it was only 5.7:1 over a bright route. The track sits at 1.9:1 even where
+// the glass picks up a white strip, so an unfilled ring never reads as "no volume".
+const badgeInk = '#dfe4e8', badgeTrack = '#8b95a1', badgeLow = '#ff453a', badgeCharging = '#30d158';
+const ringRadius = 44, ringStroke = 7.5, markScale = 0.86;
+// The glyph's own ink centre sits above the band between the number and the label, so it is nudged down
+// to land in the middle of that band instead of the middle of the circle.
+const markShift = 1.8;
+// The rings part at the top for the battery number and at the bottom for the network label, so the two
+// readings sit on one axis; every ring still carries its own progress - left battery, right volume.
+const ringGap = 26, ringEnd = 180 - ringGap;
+
+const counted = (value, limit) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.min(limit, Math.round(number)) : null;
+};
+
+// Angles run clockwise from 12 o'clock, so the two rings mirror each other around the number on top.
+const ringPoint = degrees => [
+  50 + ringRadius * Math.sin(degrees * Math.PI / 180),
+  50 - ringRadius * Math.cos(degrees * Math.PI / 180),
+];
+
+function ringPath(side) {
+  const [x0, y0] = ringPoint(side * ringGap), [x1, y1] = ringPoint(side * ringEnd);
+  return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${ringRadius} ${ringRadius} 0 0 ${side < 0 ? 0 : 1}` +
+    ` ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+}
+
+/**
+ * Progress is a dash offset over a fixed track rather than a re-cut path: `pathLength` normalises the
+ * arc to 100 units, so a new reading is one number CSS can interpolate instead of a rebuilt shape.
+ * A value that is merely small still leaves a stub, so it never reads as a missing stroke.
+ */
+const ringDash = percent =>
+  percent === null ? 100 : 100 - Math.max(percent > 0 ? 6 : 0, percent);
+
+// Both marks share one box, so switching networks never changes the icon's size. Every slot carries the
+// strength that lights it: the Wi-Fi fans fill from the inside out, the cellular bars from the left.
+const markSlots = {
+  wifi: [
+    { tag: 'path', attrs: 'd="M43.2 53.3A11 11 0 0 1 56.8 53.3"', at: 1, ink: 'stroke' },
+    { tag: 'path', attrs: 'd="M38.3 47A19 19 0 0 1 61.7 47"', at: 2, ink: 'stroke' },
+    { tag: 'path', attrs: 'd="M33.4 40.7A27 27 0 0 1 66.6 40.7"', at: 3, ink: 'stroke' },
+    { tag: 'circle', attrs: 'cx="50" cy="62" r="2.5" stroke="none"', at: 1, ink: 'fill' },
+  ],
+  cellular: [8, 16, 24, 32].map((height, index) => ({
+    tag: 'rect',
+    attrs: `x="${(31.25 + index * 10.37).toFixed(1)}" y="${64 - height}" width="6.4" height="${height}" rx="2.8"`,
+    at: index + 1,
+    ink: 'fill',
+  })),
+};
+
+const markKind = network => (network === 'wifi' ? 'wifi' : 'cellular');
+
+const slotMarkup = (slot, bars) =>
+  `<${slot.tag} ${slot.attrs} data-at="${slot.at}" data-ink="${slot.ink}"` +
+  ` ${slot.ink}="${slot.at <= bars ? badgeInk : badgeTrack}"/>`;
+
+/** Battery, volume, network and colour for one frame, or null when the server reported nothing. */
+export function phoneGaugeValues(phone) {
+  if (!phone || typeof phone !== 'object') return null;
+  const network = phoneNetworks.includes(phone.network) ? phone.network : 'none';
+  const battery = counted(phone.battery, 100);
+  const volume = counted(phone.volume, 100);
+  const bars = counted(phone.bars, 4) ?? 0;
+  if (battery === null && volume === null && network === 'none') return null;
+  // The number inherits the battery arc colour; charging is told by the colour alone.
+  const batteryColor = battery !== null && battery < lowBatteryPercent ? badgeLow :
+    phone.charging === true ? badgeCharging : badgeInk;
+  return { network, battery, volume, bars, batteryColor };
+}
+
+/** The gauge skeleton. Only the parts that never animate are fixed here; values arrive as styles. */
+export function phoneStatusMarkup(values) {
+  const { network, battery, volume, bars, batteryColor } = values;
+  const ring = (side, name, color, percent) =>
+    `<path class="${name}-track" d="${ringPath(side)}" stroke="${badgeTrack}"/>` +
+    `<path class="${name}-level" d="${ringPath(side)}" pathLength="100" stroke-dasharray="100 100"` +
+    ` stroke-dashoffset="${ringDash(percent)}" stroke="${color}"/>`;
+  return '<svg viewBox="0 0 100 100" width="100%" height="100%" role="presentation">' +
+    `<g class="rings" fill="none" stroke-width="${ringStroke}" stroke-linecap="round">` +
+    ring(-1, 'battery', batteryColor, battery) + ring(1, 'volume', badgeInk, volume) + '</g>' +
+    `<g class="mark" data-network="${network}" transform="translate(0 ${markShift}) translate(50 50) scale(${markScale}) translate(-50 -50)"` +
+    ` fill="none" stroke-width="${markKind(network) === 'wifi' ? 5 : 0}" stroke-linecap="round">` +
+    markSlots[markKind(network)].map(slot => slotMarkup(slot, bars)).join('') + '</g>' +
+    `<text class="mark-label" x="50" y="90.1" text-anchor="middle" fill="${badgeInk}"` +
+    ` font-size="12" font-weight="600">${phoneNetworkLabels[network]}</text>` +
+    `<text class="battery-number" x="50" y="20" text-anchor="middle" fill="${batteryColor}"` +
+    ` font-size="15" font-weight="600">${battery === null ? '' : battery}</text></svg>`;
+}
+
+/**
+ * Updates a rendered gauge in place. Writing styles instead of rebuilding markup is what lets the
+ * rings sweep, the colours cross-fade and the signal slots light one by one.
+ */
+export function applyPhoneGauge(svg, values) {
+  const { network, battery, volume, bars, batteryColor } = values;
+  if (!svg) return false;
+  const batteryLevel = svg.querySelector('.battery-level');
+  const volumeLevel = svg.querySelector('.volume-level');
+  if (!batteryLevel || !volumeLevel) return false;
+  batteryLevel.style.strokeDashoffset = String(ringDash(battery));
+  batteryLevel.style.stroke = batteryColor;
+  volumeLevel.style.strokeDashoffset = String(ringDash(volume));
+  const number = svg.querySelector('.battery-number');
+  if (number) {
+    number.textContent = battery === null ? '' : String(battery);
+    number.style.fill = batteryColor;
+  }
+  const label = svg.querySelector('.mark-label');
+  if (label) label.textContent = phoneNetworkLabels[network];
+  const mark = svg.querySelector('.mark');
+  if (mark) {
+    if (mark.dataset.network !== network) {
+      const kind = markKind(network);
+      mark.dataset.network = network;
+      mark.setAttribute('stroke-width', kind === 'wifi' ? 5 : 0);
+      mark.innerHTML = markSlots[kind].map(slot => slotMarkup(slot, bars)).join('');
+    }
+    for (const slot of mark.querySelectorAll('[data-at]')) {
+      slot.style[slot.dataset.ink] = Number(slot.dataset.at) <= bars ? badgeInk : badgeTrack;
+    }
+  }
+  return true;
+}
+
+/** Markup for the floating badge, or null when the server reported nothing usable. */
+export function phoneStatusBadge(phone) {
+  const values = phoneGaugeValues(phone);
+  return values === null ? null : phoneStatusMarkup(values);
+}
+
 import { createBrowserAudio } from './browser-audio.js';
 
 if (typeof document !== 'undefined') {
@@ -1259,11 +1407,111 @@ if (typeof document !== 'undefined') {
     if (socket) { const old = socket; socket = null; old.close(); }
     presentation.close(); cleanupRtc(); cleanupImage();
     browserAudio.close(); $('audio-message').hidden = true;
+    renderPhoneStatus(null);
     $('topbar').hidden = false; $('pairing').hidden = false; $('display').hidden = true;
     syncDisplayZoom();
     $('disconnect').hidden = true; $('connect').disabled = false;
     $('status').textContent = t("web_disconnected");
     if (refreshQr) initializePairing();
+  }
+  // The badge only changes when the phone's own state changes; rewriting the SVG on every 400 ms
+  // ping would keep the head unit compositing a picture that never moved.
+  const statusBadge = $('phone-status');
+  const badgePositionPreference = 'wheelplay.badgePosition';
+  let phoneGaugeSvg = null;
+
+  // `#display` can be inverse-scaled against browser zoom, so a screen-pixel drag delta has to be
+  // divided back into the element's own CSS pixels before it is stored or applied.
+  function badgeScale() {
+    const width = display.getBoundingClientRect().width;
+    return display.offsetWidth && width ? width / display.offsetWidth : 1;
+  }
+
+  function moveBadge(left, top) {
+    const limitX = Math.max(4, display.clientWidth - statusBadge.offsetWidth - 4);
+    const limitY = Math.max(4, display.clientHeight - statusBadge.offsetHeight - 4);
+    statusBadge.style.left = `${Math.min(Math.max(4, left), limitX)}px`;
+    statusBadge.style.top = `${Math.min(Math.max(4, top), limitY)}px`;
+    statusBadge.style.right = 'auto';
+  }
+
+  function storedBadgePosition() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(badgePositionPreference) || 'null');
+      return saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : null;
+    } catch (_) { return null; }
+  }
+
+  // Re-applied after the first frame and on every resize: a saved offset is only meaningful while
+  // the display box keeps its size, and the gauge must never end up half outside it.
+  function restoreBadgePosition() {
+    const saved = storedBadgePosition();
+    if (saved) moveBadge(saved.x, saved.y);
+  }
+
+  // Dragging is the only gesture; a double tap hands the corner back to the default placement.
+  let badgeDrag = null;
+  statusBadge.addEventListener('pointerdown', event => {
+    if (event.button) return;
+    badgeDrag = {
+      id: event.pointerId, x: event.clientX, y: event.clientY,
+      left: statusBadge.offsetLeft, top: statusBadge.offsetTop, moved: false,
+    };
+    statusBadge.setPointerCapture?.(event.pointerId);
+    statusBadge.classList.add('dragging');
+    event.preventDefault();
+    // The gauge floats above the picture; a drag must never reach CarPlay as a touch.
+    event.stopPropagation();
+  });
+  statusBadge.addEventListener('pointermove', event => {
+    if (!badgeDrag || event.pointerId !== badgeDrag.id) return;
+    const scale = badgeScale();
+    const dx = (event.clientX - badgeDrag.x) / scale, dy = (event.clientY - badgeDrag.y) / scale;
+    // A tap that jitters a few pixels must not slide the gauge.
+    if (!badgeDrag.moved && Math.hypot(dx, dy) < 8) return;
+    badgeDrag.moved = true;
+    moveBadge(badgeDrag.left + dx, badgeDrag.top + dy);
+  });
+  function endBadgeDrag(event) {
+    if (!badgeDrag || event.pointerId !== badgeDrag.id) return;
+    statusBadge.releasePointerCapture?.(event.pointerId);
+    statusBadge.classList.remove('dragging');
+    if (badgeDrag.moved) {
+      try {
+        window.localStorage.setItem(badgePositionPreference, JSON.stringify(
+          { x: statusBadge.offsetLeft, y: statusBadge.offsetTop }));
+      } catch (_) {}
+    }
+    badgeDrag = null;
+  }
+  statusBadge.addEventListener('pointerup', endBadgeDrag);
+  statusBadge.addEventListener('pointercancel', endBadgeDrag);
+  statusBadge.addEventListener('dblclick', () => {
+    try { window.localStorage.removeItem(badgePositionPreference); } catch (_) {}
+    statusBadge.style.left = statusBadge.style.top = statusBadge.style.right = '';
+  });
+  window.addEventListener('resize', restoreBadgePosition);
+  restoreBadgePosition();
+
+  function renderPhoneStatus(phone) {
+    const values = phoneGaugeValues(phone);
+    if (values === null) {
+      statusBadge.hidden = true;
+      statusBadge.innerHTML = '';
+      phoneGaugeSvg = null;
+      return;
+    }
+    const first = phoneGaugeSvg === null;
+    // The skeleton stays in the document, so a new reading is a style change CSS can interpolate -
+    // sweeping rings, cross-fading colours, lighting one signal slot at a time. Only the first frame,
+    // or a gauge whose nodes went missing, goes through the string builder.
+    if (first || !applyPhoneGauge(statusBadge.firstElementChild, values)) {
+      statusBadge.innerHTML = phoneStatusMarkup(values);
+      phoneGaugeSvg = statusBadge.firstElementChild;
+    }
+    statusBadge.hidden = false;
+    // The first measurable layout box is where a stored position becomes meaningful.
+    if (first) restoreBadgePosition();
   }
   function connect() {
     clearTimeout(retry);
@@ -1363,6 +1611,9 @@ if (typeof document !== 'undefined') {
           serverRtcHint = data.rtcHint || '';
           serverRtcDiag = data.rtcDiag || '';
           if (data.media) { serverMedia = data.media; mediaProbe?.apply(data.media); }
+          // The phone's own battery and radio stay current even while no video is flowing, so the
+          // badge is refreshed before any early return below.
+          renderPhoneStatus(data.phone);
           performanceStats.source = data.performance?.source ?? null;
           performanceStats.transport = data.performance?.transport ?? null;
           performanceStats.image = data.performance?.image ?? null;
@@ -1412,6 +1663,7 @@ if (typeof document !== 'undefined') {
       cancelMove();
       socket = null; pointers.clear(); clearInterval(heartbeat); presentation.close(); cleanupRtc(); cleanupImage();
       browserAudio.close(); $('audio-message').hidden = true;
+      renderPhoneStatus(null);
       if (stopped) return;
       if (!paired || ++attempts > 8) {
         disconnect(); $('status').textContent = t("web_could_not_connect");
