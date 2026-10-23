@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.web
 
 import android.content.Context
 import android.os.SystemClock
+import android.util.Base64
 import android.util.Log
 import com.shilapi.xcertplay.CarPlayBackgroundSession
 import com.shilapi.xcertplay.airplay.AirPlayContact
@@ -447,6 +448,7 @@ internal class LanWebServer(
         private var rtcLastFallback: String? = null
         // Last forwarded Media Session action and its CarPlay result, echoed back to ?diag=1.
         private var mediaEcho: String? = null
+        private var mediaArtworkKey: String? = null
         private var rtcHint: String? = null
         private var hevcSupported = true
         private var rtcAvailableSince = 0L
@@ -819,6 +821,22 @@ internal class LanWebServer(
                                                     playing.title?.let { put("title", it.take(80)) }
                                                     playing.artist?.let { put("artist", it.take(80)) }
                                                     put("playing", playing.playing)
+                                                    // Artwork only travels once per picture: the previous cover stays
+                                                    // retained while the new one is still transferring, so the track
+                                                    // revision alone cannot tell two images apart.
+                                                    val picture = playing.artwork
+                                                    if (picture != null) {
+                                                        val bytes = picture.bytes()
+                                                        val key = "${bytes.size}-${bytes.contentHashCode()}"
+                                                        if (key != mediaArtworkKey && bytes.size <= 200_000) {
+                                                            mediaArtworkKey = key
+                                                            put(
+                                                                "artwork",
+                                                                "data:image/jpeg;base64," +
+                                                                    Base64.encodeToString(bytes, Base64.NO_WRAP),
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                         },
                                     )
@@ -856,18 +874,19 @@ internal class LanWebServer(
                         require(action.all { it.isLetterOrDigit() })
                         val command = WebMediaKeys.command(action)
                         val controller = CarPlayBackgroundSession.snapshot()?.controller
+                        val label = "$action→${command?.name ?: "UNMAPPED"}"
                         val echo =
                             when {
-                                command == null -> "media=$action→UNMAPPED"
-                                controller == null -> "media=$action→NO_SESSION"
+                                command == null -> "media=$label"
+                                controller == null -> "media=$label NO_SESSION"
                                 else -> {
                                     controller.sendMediaCommand(command)
                                         .whenComplete { result, _ ->
-                                            val outcome = "media=$action→${result ?: "FAILED"}"
+                                            val outcome = "media=$label:${result ?: "FAILED"}"
                                             synchronized(rtcLock) { mediaEcho = outcome }
                                             Log.i("WheelPlayWeb", "media $outcome t=${SystemClock.elapsedRealtime()}")
                                         }
-                                    "media=$action→SENT"
+                                    "media=$label:SENT"
                                 }
                             }
                         mediaEcho = echo

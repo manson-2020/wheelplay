@@ -6,6 +6,8 @@ import org.junit.Test
 
 class WebMediaKeysTest {
     @Test fun mediaSessionActionsMapToCarPlayCommands() {
+        // The iPhone ignores the toggle key and keeps reporting PLAYING after a pause, so the page
+        // alternates concrete PAUSE / PLAY presses and each action maps to its own key.
         assertEquals(MediaCommand.PLAY, WebMediaKeys.command("play"))
         assertEquals(MediaCommand.PAUSE, WebMediaKeys.command("pause"))
         assertEquals(MediaCommand.NEXT, WebMediaKeys.command("nexttrack"))

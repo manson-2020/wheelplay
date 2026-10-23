@@ -304,22 +304,33 @@ export function createMediaSessionProbe({
   if (!session || typeof session.setActionHandler !== 'function') {
     return { available: false, last: null, apply() {} };
   }
-  let last = null;
+  let last = null, artwork = null;
+  let fields = { title: 'WheelPlay', artist: 'CarPlay' };
+  function publish() {
+    try {
+      const metadata = artwork
+        ? { ...fields, artwork: [{ src: artwork, sizes: '512x512', type: 'image/jpeg' }] }
+        : fields;
+      session.metadata = typeof MediaMetadata === 'function' ? new MediaMetadata(metadata) : metadata;
+      // Chrome releases the platform session as soon as a page reports "paused", and the head unit
+      // then stops delivering the key, so the session always claims to be playing.
+      session.playbackState = 'playing';
+    } catch (_) {}
+  }
   function apply(media = {}) {
-    try {
-      const fields = { title: String(media.title || 'WheelPlay'), artist: String(media.artist || 'CarPlay') };
-      session.metadata = typeof MediaMetadata === 'function' ? new MediaMetadata(fields) : fields;
-      session.playbackState = media.playing === false ? 'paused' : 'playing';
-    } catch (_) {}
+    if (media.title || media.artist) {
+      fields = { title: String(media.title || 'WheelPlay'), artist: String(media.artist || 'CarPlay') };
+    }
+    if (media.artwork) artwork = media.artwork;
+    publish();
   }
-  apply();
+  function press(action) {
+    last = { action, at: now() }; onAction(action); send({ type: 'media', action }); publish();
+  }
   for (const action of actions) {
-    try {
-      session.setActionHandler(action, () => {
-        last = { action, at: now() }; onAction(action); send({ type: 'media', action });
-      });
-    } catch (_) {}
+    try { session.setActionHandler(action, () => press(action)); } catch (_) {}
   }
+  publish();
   return { available: true, apply, get last() { return last; } };
 }
 

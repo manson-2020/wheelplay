@@ -59,18 +59,31 @@ test('viewport negotiation preserves aspect while fitting Android dimension limi
 
 test('the media session probe forwards actions and applies server metadata', () => {
   const handlers = {}, sent = [];
+  let clock = 5000;
   const session = { metadata: null, playbackState: '', setActionHandler: (name, fn) => { handlers[name] = fn; } };
-  const probe = createMediaSessionProbe({ session, send: message => sent.push(message), now: () => 5000 });
+  const probe = createMediaSessionProbe({ session, send: message => sent.push(message), now: () => clock });
   assert.equal(probe.available, true);
   assert.deepEqual(Object.keys(handlers).sort(),
     ['nexttrack', 'pause', 'play', 'previoustrack', 'seekbackward', 'seekforward'].sort());
   assert.deepEqual(session.metadata, { title: 'WheelPlay', artist: 'CarPlay' });
   assert.equal(session.playbackState, 'playing');
-  handlers.nexttrack(); handlers.play();
-  assert.deepEqual(sent, [{ type: 'media', action: 'nexttrack' }, { type: 'media', action: 'play' }]);
-  assert.deepEqual(probe.last, { action: 'play', at: 5000 });
-  probe.apply({ title: '慢懂', artist: '汪苏泷', playing: false });
-  assert.deepEqual(session.metadata, { title: '慢懂', artist: '汪苏泷' });
-  assert.equal(session.playbackState, 'paused');
+  handlers.nexttrack(); handlers.previoustrack();
+  assert.deepEqual(sent, [{ type: 'media', action: 'nexttrack' }, { type: 'media', action: 'previoustrack' }]);
+  assert.deepEqual(probe.last, { action: 'previoustrack', at: 5000 });
+  probe.apply({ title: '慢懂', artist: '汪苏泷', artwork: 'data:image/jpeg;base64,AAA' });
+  assert.deepEqual(session.metadata.title, '慢懂');
+  assert.equal(session.metadata.artwork[0].src, 'data:image/jpeg;base64,AAA');
   assert.equal(createMediaSessionProbe({ send() {}, session: null }).available, false);
+});
+
+test('the page forwards the action it is given and never claims to be paused', () => {
+  const handlers = {}, sent = [];
+  const session = { metadata: null, playbackState: '', setActionHandler: (name, fn) => { handlers[name] = fn; } };
+  createMediaSessionProbe({ session, send: message => sent.push(message), now: () => 1000 });
+  handlers.pause(); handlers.pause();
+  // No local counting: the measured head unit stops delivering the key once the media is paused,
+  // so a resume cannot be produced from the button and the page only relays what it receives.
+  assert.deepEqual(sent.map(message => message.action), ['pause', 'pause']);
+  // Reporting "paused" would release the Chrome platform session and lose the key entirely.
+  assert.equal(session.playbackState, 'playing');
 });

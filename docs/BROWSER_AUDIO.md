@@ -21,12 +21,11 @@
 ## 方向盘媒体键（`?ms=1`）
 
 网页在 `?ms=1` 时注册 `navigator.mediaSession`（播放/暂停/上一曲/下一曲/快进快退），动作经 WebSocket 发
-`{"type":"media","action":"pause"}`；服务端映射为 CarPlay 媒体命令（PLAY / PAUSE / NEXT / PREVIOUS）并下发 iPhone，
-快进快退无对应 HID 命令，返回 `UNMAPPED`。手机把最近一次执行结果回给网页，`?diag=1` 面板显示
+`{"type":"media","action":"pause"}`；服务端映射为 CarPlay 媒体命令并下发 iPhone：play→PLAY、pause→PAUSE、nexttrack→NEXT、previoustrack→PREVIOUS，快进快退无对应 HID 命令，返回 `UNMAPPED`。手机把最近一次执行结果回给网页，`?diag=1` 面板显示
 `last=<动作> media=<动作>→<结果>`（SENT / UNMAPPED / NO_SESSION / 结果枚举）；歌名与艺人由手机的 NowPlaying
-状态回填到 `mediaSession.metadata`，播放状态同步 `playbackState`。不带 `?ms` 时网页不注册媒体会话，行为不变。
+状态回填到 `mediaSession.metadata`（包含封面：服务端按图片内容去重，仅在封面字节变化时随状态消息下发一张 ≤200 KB 的 base64 图，页面缓存后复用）；`playbackState` **永远上报 playing** —— Chrome 一旦看到 paused 就会释放平台媒体会话，车机从此不再把按键送到页面。实测边界：这台 Tesla 车机只把「暂停」投递给页面，媒体暂停后不再下发播放按键；HID 的 play/pause 切换键（index 3，MediaCommand.TOGGLE）又被 iPhone 忽略。所以页面只原样转发收到的动作，不做任何本地计数或状态推断。不带 `?ms` 时网页不注册媒体会话，行为不变。
 
-实测边界：Tesla 车机只把「播放/暂停」投递给浏览器媒体会话，「上一曲/下一曲」既不到 media session 也无 keydown
+实测边界：Tesla 车机只把「播放/暂停」中的暂停投递给浏览器媒体会话，暂停后不再下发播放按键；「上一曲/下一曲」既不到 media session 也无 keydown
 （切歌属 AVRCP 命令，只在蓝牙音频在线时发给手机），因此需要方向盘切歌仍须用「蓝牙音频优先」+ 图片串流。
 
 ## 显示和离线行为
