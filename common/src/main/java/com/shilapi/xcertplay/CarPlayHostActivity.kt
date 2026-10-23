@@ -2686,18 +2686,18 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun resolvePhysicalSize(size: DisplaySize): AirPlayPhysicalSizeMm {
-        // When the browser viewport is authoritative (adaptive browser size on), the negotiated
-        // canvas IS the real target display. Normalizing physical mm against the per-phone,
-        // cross-device maximumDetected history makes two Android hosts report different mm for the
-        // same car browser, so iPhone selects a different CarPlay UI scale and the picture fills
-        // the screen at a different proportion. Use the current display as its own basis (ratio 1)
-        // so the configured widthPhysicalMm is reported verbatim, independent of connection history.
-        val authoritative = WebSession.adaptiveBrowserSize
+        // The browser canvas fills its display at every pixel resolution, so it is its own physical
+        // basis. Normalizing physical mm against the per-phone, cross-device maximumDetected history
+        // makes two Android hosts report different mm for the same car browser, so iPhone selects a
+        // different CarPlay UI scale and the picture fills the screen at a different proportion.
+        // Treating the canvas as a fraction of a previous viewport also shrinks the reported screen
+        // and enlarges iOS UI. Use the current display as its own basis (ratio 1) so the configured
+        // widthPhysicalMm is reported verbatim, independent of connection history.
         return AirPlayDisplaySettings.resolvePhysicalSizeMm(
             currentWidthPixels = size.width,
             currentHeightPixels = size.height,
-            maximumWidthPixels = if (authoritative) size.width else maxOf(maximumDetectedWidthPixels, size.width),
-            maximumHeightPixels = if (authoritative) size.height else maxOf(maximumDetectedHeightPixels, size.height),
+            maximumWidthPixels = size.width,
+            maximumHeightPixels = size.height,
             referenceMillimeters = widthPhysicalMm,
             basis = physicalSizeBasis,
         )
