@@ -439,6 +439,9 @@ internal class LanWebServer(
         private var rtcOffer: RtcSdpSummary.Summary? = null
         private var rtcDiagnostics: String? = null
         private var rtcFallbackStates: String? = null
+        // Kept across retries and cleared only by a displayed frame: a head unit photo taken
+        // between attempts must still show why the previous attempt stopped.
+        private var rtcLastFallback: String? = null
         private var rtcHint: String? = null
         private var hevcSupported = true
         private var rtcAvailableSince = 0L
@@ -795,6 +798,8 @@ internal class LanWebServer(
                                             rtcDiagnostics,
                                             rtcFallbackStates,
                                             rtcOffer?.profileLevelId?.let { "profile=$it" },
+                                            rtcAnswer?.let { "answer=${it.media} setup=${it.setup} ${it.candidates}" },
+                                            rtcLastFallback,
                                         ).joinToString(" "),
                                     )
                                     .put("rtcRetryAfterMs", rtcRetry.retryAfterMs)
@@ -910,6 +915,7 @@ internal class LanWebServer(
                     "rtc-ready" ->
                         synchronized(rtcLock) {
                             if (data.getLong("id") == rtcId) {
+                                rtcLastFallback = null
                                 rtc?.displayed()
                                 if (rtc?.holdingFrame == true) rtcRetry.ready()
                                 sender.acknowledge()
@@ -935,6 +941,8 @@ internal class LanWebServer(
                                     data.optString("gather").takeIf(String::isNotEmpty)?.let { "gather=$it" },
                                     if (data.optInt("track", 0) == 1) "track=1" else null,
                                 ).joinToString(" ").takeIf { it.isNotEmpty() }
+                                rtcLastFallback =
+                                    "fallback=$reason" + (rtcFallbackStates?.let { " $it" } ?: "")
                                 Log.i(
                                     "WheelPlayWeb",
                                     "rtc-fallback id=$rtcId reason=$reason retryable=$retryable " +

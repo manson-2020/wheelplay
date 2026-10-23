@@ -72,7 +72,7 @@ ACK 不是累计确认。客户端拥塞队列保存每个不同 ACK，不能把
 `window.wheelplayStats.image` 提供协议、实际最近图片格式、窗口、在途帧数、payload
 字节数、实际编码质量、发送帧率（`sentFps`）、源编码帧率（`encodedFps`）及最近 ACK 耗时。
 ACK 耗时包含传输、浏览器解码 / 淘汰和确认回程，不等于纯 RTT 或显示器已经扫描输出的时间。
-`?diag=1` 在状态行显示 `enc` / `tx` / `ack`：`enc` 明显低于 `tx` 时瓶颈在手机编码；
+`?diag=1` 的诊断框显示 `img enc` / `tx` / `ack`：`enc` 明显低于 `tx` 时瓶颈在手机编码；
 `tx` 低于 15 且 `ack` 偏高时瓶颈在浏览器解码或确认回程。
 
 ## 验证

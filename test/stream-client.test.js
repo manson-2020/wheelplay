@@ -878,7 +878,9 @@ test('a browser without RTCPeerConnection never requests an offer', async () => 
 test('?diag=1 names the WebRTC stage on the status line and ?unhide=1 keeps a layout box', async () => {
   const f = fixture({ search: '?diag=1&unhide=1' }), ws = await f.connect();
   ws.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true, rtcDiag: 'hasPc=1 hasRvfc=1' }) });
-  assert.match(f.element('status').textContent, /WebRTC: hasPc=1 hasRvfc=1/);
+  assert.match(f.element('status').textContent, /WebRTC: idle/);
+  assert.equal(f.element('diag-panel').hidden, false);
+  assert.match(f.element('diag-panel').textContent, /hasPc=1 hasRvfc=1/);
   // Assert synchronously after ontrack: the layout box only exists until the first frame.
   ws.onmessage({ data: JSON.stringify({ type: 'rtc-offer', id: 1, sdp: 'offer' }) });
   await new Promise(resolve => setImmediate(resolve));
@@ -890,4 +892,5 @@ test('?diag=1 names the WebRTC stage on the status line and ?unhide=1 keeps a la
   const hidden = fixture(), hiddenWs = await hidden.connect();
   hiddenWs.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true, rtcDiag: 'hasPc=1' }) });
   assert.doesNotMatch(hidden.element('status').textContent, /WebRTC:/);
+  assert.equal(hidden.element('diag-panel').hidden, true);
 });

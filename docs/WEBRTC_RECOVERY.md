@@ -87,7 +87,11 @@ WebRTC 的 ICE socket 绑定到本次 WebSocket 连接在本机的 IPv4 地址�
 - `rtc-diag id=.. answer media=video:9 codecs=<rtpmap + fmtp> setup=passive candidates=host:N,srflx:N,relay:N,mdns:N`（网页端视角）
 - `rtc-not-requested waited=..ms codec=..`（能力可见但浏览器从未请求）
 
-车机上可用 `?diag=1` 在状态栏直接看到 ` · WebRTC: <lastReason | 能力快照 | rtc-not-requested | hevc-unsupported>`；回退后仍会附带 `hasPc` / `codecs` 能力快照，不依赖 devtools / adb；`?unhide=1` 让首帧前的 video 保持视口内 1 px、`opacity:0` 的布局盒（`pending-video`）而不是 `display:none`，用于验证老 Chromium 是否不解码隐藏元素（原生 Video 与兼容 Canvas 模式有 video 元素；直接 Canvas 模式不需要）。二者都只是开关，默认行为不变。HEVC 被拒后状态栏会提示「在 WheelPlay 设置中关闭 HEVC 才能在此车机上使用 WebRTC」。
+`?diag=1` 状态行还会拼上 answer 摘要（`answer=video:N setup=… candidates=…`）和最近一次回退
+（`fallback=<reason> conn=… ice=… gather=… [track=1]`）。回退记录保留到下一次成功显示首帧为止，
+重试间隙拍屏也能看到；`mdns` 候选数、`setup` 角色和 `conn` 状态是判断车机端卡在哪一步的依据。
+
+车机上可用 `?diag=1` 看到 WebRTC 现场：状态行只保留简短的 ` · WebRTC: <reason|ok|idle>`（顶栏高度固定，长文本会溢出遮住画面），能力快照与上面的 answer / fallback 详情一起放进画面左下角的独立诊断框（可滚动、不拦截触控），不依赖 devtools / adb；`?unhide=1` 让首帧前的 video 保持视口内 1 px、`opacity:0`  的布局盒（`pending-video`）而不是 `display:none`，用于验证老 Chromium 是否不解码隐藏元素（原生 Video 与兼容 Canvas 模式有 video 元素；直接 Canvas 模式不需要）。二者都只是开关，默认行为不变。HEVC 被拒后状态栏会提示「在 WheelPlay 设置中关闭 HEVC 才能在此车机上使用 WebRTC」。
 
 ## 排查与真机验证
 
