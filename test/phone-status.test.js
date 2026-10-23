@@ -5,7 +5,8 @@ import { phoneStatusBadge, phoneGaugeValues } from '../common/src/main/assets/we
 const ink = '#dfe4e8', track = '#8b95a1', low = '#ff453a', charging = '#30d158';
 
 // The rings group holds its strokes in a fixed order: battery track, battery progress, volume track,
-// volume progress. Progress is a dash offset over a `pathLength` of 100, so the offset is the value.
+// volume progress. Progress is a dash offset over a `pathLength` of 100, so the offset is the value, and
+// an empty ring parks that offset past 100 so no cap of the hidden dash can show.
 const groupMarkup = (markup, cls) =>
   markup.match(new RegExp(`<g class="${cls}"[\\s\\S]*?<\\/g>`))?.[0] ?? '';
 const ringStrokes = markup => [...groupMarkup(markup, 'rings')
@@ -54,10 +55,20 @@ test('each ring carries its own progress as a dash offset over a fixed track', (
   assert.deepEqual(ringOffsets(gauge({ network: 'wifi', bars: 4, battery: 100, volume: 100 })),
     { battery: 0, volume: 0 });
   assert.deepEqual(ringOffsets(gauge({ network: 'wifi', bars: 4, battery: 0, volume: 0 })),
-    { battery: 100, volume: 100 });
+    { battery: 107, volume: 107 });
   // A reading too small to see still leaves a stub rather than vanishing.
   assert.deepEqual(ringOffsets(gauge({ network: 'wifi', bars: 4, battery: 3, volume: -1 })),
-    { battery: 94, volume: 100 });
+    { battery: 94, volume: 107 });
+});
+
+test('an empty ring stays empty at both of its ends', () => {
+  const markup = gauge({ network: 'wifi', bars: 4, battery: 0, volume: 0 });
+  // A gap the size of the dash wraps the pattern onto the far end of the arc, so the tail lights up
+  // even at zero; the gap is therefore three times the dash.
+  assert.deepEqual([...groupMarkup(markup, 'rings').matchAll(/stroke-dasharray="([^"]+)"/g)]
+    .map(match => match[1]), ['100 300', '100 300']);
+  // One path length would park the round cap on the arc's start, so empty sits further out.
+  assert.deepEqual(ringOffsets(markup), { battery: 107, volume: 107 });
 });
 
 test('the Wi-Fi fan is the signal meter: its arcs light from the inside out', () => {
@@ -94,7 +105,7 @@ test('every transport fills the bottom opening with a word', () => {
 test('an unreadable battery empties its own slots without taking the rest down', () => {
   const markup = gauge({ network: 'wifi', bars: 3, battery: -1, volume: 50 });
   assert.equal(numberText(markup), '');
-  assert.equal(ringOffsets(markup).battery, 100);
+  assert.equal(ringOffsets(markup).battery, 107);
   assert.equal(ringOffsets(markup).volume, 50);
   assert.match(markup, /class="mark"/);
 });

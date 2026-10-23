@@ -14,7 +14,6 @@ import com.shilapi.xcertplay.airplay.AudioFormat
 import com.shilapi.xcertplay.airplay.MediaSink
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.MicrophoneCounters
-import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.toHexString
 import java.io.Closeable
 import java.nio.ByteBuffer
@@ -42,6 +41,7 @@ class AndroidMediaSink(
     private val onAudioDiagnostic: (String) -> Unit = {},
     private val onClosed: () -> Unit = {},
     private val encodedVideo: EncodedVideoSink? = null,
+    private val frameDecoderFactory: ((ByteArray) -> VideoFrameDecoder?)? = null,
     private val remoteAudio: RemoteAudioRoute? = null,
 ) : MediaSink, MediaOutputControl {
     @Volatile private var localMediaAllowed = false
@@ -79,10 +79,14 @@ class AndroidMediaSink(
     private val videoDecoders = ConcurrentHashMap<Int, VideoDecoder>()
     private val audioRenderers = ConcurrentHashMap<Int, AudioRenderer>()
     private val microphoneUplinks = ConcurrentHashMap<Int, MicrophoneUplink>()
+    // Retired workers may still be releasing codecs after protocol stop callbacks remove them.
+    private val videoWorkers = java.util.concurrent.ConcurrentLinkedQueue<VideoDecoder>()
+    private val audioWorkers = java.util.concurrent.ConcurrentLinkedQueue<AudioRenderer>()
+    private val microphoneWorkers = java.util.concurrent.ConcurrentLinkedQueue<MicrophoneUplink>()
     private val microphoneConfigs = mutableMapOf<Int, MicrophoneConfig>()
     private val microphoneCounters = mutableMapOf<Int, MicrophoneCounters>()
     private val microphoneLock = Any()
-    private var closed = false
+    @Volatile private var closed = false
     private val microphoneExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "carplay-mic-route").apply { isDaemon = true }
     }
@@ -187,10 +191,12 @@ class AndroidMediaSink(
     }
 
     override fun onVideoCodec(type: Int, codec: VideoCodec) {
+        if (closed) return
         pendingVideoCodec[type] = codec
     }
 
     override fun onVideoConfig(type: Int, codecData: ByteArray) {
+        if (closed) return
         val codec = pendingVideoCodec[type] ?: VideoCodec.H264
         val unchanged = videoConfigs[type]?.contentEquals(codecData) == true
         videoConfigs[type] = codecData
@@ -200,7 +206,7 @@ class AndroidMediaSink(
         videoDecoder(type).configure(codec, codecData)
     }
 
-    override fun createVideoFrameDecoder(key: ByteArray) = encodedVideo?.createFrameDecoder(key)
+    override fun createVideoFrameDecoder(key: ByteArray) = frameDecoderFactory?.invoke(key)
 
     override fun onVideoFrame(type: Int, naluBytes: ByteArray) {
         onVideoFrame(type, naluBytes, System.nanoTime() / 1000)
@@ -213,6 +219,7 @@ class AndroidMediaSink(
         onVideoFrame(type, HeapVideoFrame(naluBytes), presentationTimeUs, receivedAtNs, decryptNs)
 
     override fun onVideoFrame(type: Int, frame: CompressedVideoFrame, presentationTimeUs: Long, receivedAtNs: Long, decryptNs: Long) {
+        if (closed) return
         // When this screen is shown on the phone the phone owns its frames and the browser push is
         // skipped entirely, so only one pipeline runs at a time.
         if (type in localDisplayTypes) {
@@ -256,10 +263,12 @@ class AndroidMediaSink(
     }
 
     override fun onAudioStarted(type: Int, format: AudioFormat, firstSample: Int) {
+        if (closed) return
         audioRenderer(type, format).start()
     }
 
     override fun onAudioRtp(type: Int, format: AudioFormat, rtp: ByteArray, sample: Int) {
+        if (closed) return
         audioRenderer(type, format).submit(rtp, sample)
     }
 
@@ -280,7 +289,10 @@ class AndroidMediaSink(
         if (remoteAudio?.microphoneEnabled == false) return
         val uplink = microphoneUplinks.computeIfAbsent(type) {
             MicrophoneUplink(config, remoteAudio?.microphone(type, config),
-                microphoneCounters.getOrPut(type) { MicrophoneCounters() })
+                microphoneCounters.getOrPut(type) { MicrophoneCounters() }).also {
+                    microphoneWorkers.removeIf { it.isStopped }
+                    microphoneWorkers.add(it)
+                }
         }
         if (!uplink.start()) microphoneUplinks.remove(type, uplink)
     }
@@ -294,7 +306,7 @@ class AndroidMediaSink(
         }
     }
 
-    fun close() {
+    fun close(awaitWorkers: Boolean = false) {
         synchronized(microphoneLock) {
             if (closed) return
             closed = true
@@ -313,6 +325,8 @@ class AndroidMediaSink(
             screenStreamActiveChanged = null
         }
         videoDecoders.values.forEach(VideoDecoder::close)
+        if (awaitWorkers) videoWorkers.forEach { it.awaitStopped() }
+        videoWorkers.clear()
         videoDecoders.clear()
         videoConfigs.keys.forEach { encodedVideo?.stopped(it) }
         videoConfigs.clear()
@@ -321,6 +335,11 @@ class AndroidMediaSink(
         videoDiagnosticHandlers.clear()
         recoveryExecutor.shutdownNow()
         audioRenderers.values.forEach(AudioRenderer::close)
+        if (awaitWorkers) {
+            audioWorkers.forEach { it.awaitStopped() }
+            microphoneWorkers.forEach { it.awaitStopped() }
+        }
+        audioWorkers.clear(); microphoneWorkers.clear()
         audioRenderers.clear()
         onClosed()
     }
@@ -334,7 +353,10 @@ class AndroidMediaSink(
                 preferSoftwareHevcDecoder,
                 requestKeyFrame = { requestVideoRecovery(type) },
                 report = { videoDiagnosticHandlers[type]?.invoke(it) },
-            )
+            ).also {
+                videoWorkers.removeIf { it.isStopped }
+                videoWorkers.add(it)
+            }
         }
 
     @Synchronized
@@ -357,7 +379,11 @@ class AndroidMediaSink(
                 }
                 forwarded
             })
-            .also { audioRenderers[type] = it }
+            .also {
+                audioWorkers.removeIf { it.isStopped }
+                audioWorkers.add(it)
+                audioRenderers[type] = it
+            }
     }
 }
 
@@ -405,6 +431,14 @@ private class VideoDecoder(
     override fun close() {
         running = false
         thread.interrupt()
+    }
+
+    val isStopped get() = !running && !thread.isAlive
+
+    fun awaitStopped() {
+        check(Thread.currentThread() !== thread) { "Cannot await own media worker" }
+        thread.join(5_000)
+        check(!thread.isAlive) { "Media worker did not stop" }
     }
 
     private fun run() {
@@ -760,6 +794,14 @@ private class AudioRenderer(
     override fun close() {
         running = false
         thread.interrupt()
+    }
+
+    val isStopped get() = !running && !thread.isAlive
+
+    fun awaitStopped() {
+        check(Thread.currentThread() !== thread) { "Cannot await own media worker" }
+        thread.join(5_000)
+        check(!thread.isAlive) { "Media worker did not stop" }
     }
 
     private fun run() {

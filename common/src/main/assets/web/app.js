@@ -1,4 +1,5 @@
 import { t } from './text.js';
+import { createDesktopInput } from './desktop-input.js';
 // A surface inversely scaled inside the visual viewport cancels browser zoom.
 // Its bounding rectangle remains in the same CSS coordinates as pointer events.
 export function unzoomedDisplayRect(rect, visual) {
@@ -228,10 +229,10 @@ export function createControlOutbox(socket, {
 } = {}) {
   const touches = [], imageAcks = new Map();
   const signals = [];
-  let ack = null, audioAck = null, audioReady = null, ping = null, feedback = null, viewport = null, timer = null, blockedSince = null, closed = false;
+  let ack = null, audioAck = null, audioReady = null, ping = null, feedback = null, viewport = null, locationFix = null, timer = null, blockedSince = null, closed = false;
   const close = () => {
     closed = true; cancel(timer); timer = null;
-    ack = null; audioAck = null; audioReady = null; ping = null; feedback = null; viewport = null; touches.length = 0; signals.length = 0;
+    ack = null; audioAck = null; audioReady = null; ping = null; feedback = null; viewport = null; locationFix = null; touches.length = 0; signals.length = 0;
     imageAcks.clear();
   };
   const fail = () => { close(); onFailure(); };
@@ -239,7 +240,7 @@ export function createControlOutbox(socket, {
     if (closed) return;
     if (socket.readyState !== 1) { close(); return; }
     try {
-      while ((ack || imageAcks.size || audioAck || audioReady || touches.length || signals.length || viewport || feedback || ping) && socket.bufferedAmount < 8192) {
+      while ((ack || imageAcks.size || audioAck || audioReady || touches.length || signals.length || viewport || locationFix || feedback || ping) && socket.bufferedAmount < 8192) {
         if (imageAcks.size) {
           const [key, json] = imageAcks.entries().next().value; socket.send(json); imageAcks.delete(key);
         } else if (ack) { socket.send(ack); ack = null; }
@@ -248,12 +249,13 @@ export function createControlOutbox(socket, {
         else if (touches.length) { socket.send(touches[0].json); touches.shift(); }
         else if (signals.length) { socket.send(signals[0]); signals.shift(); }
         else if (viewport) { socket.send(viewport); viewport = null; }
+        else if (locationFix) { socket.send(locationFix); locationFix = null; }
         else if (feedback) { socket.send(feedback); feedback = null; }
         else { socket.send(ping); ping = null; }
         blockedSince = null;
       }
     } catch (_) { fail(); return; }
-    if (ack || imageAcks.size || audioAck || audioReady || touches.length || signals.length || viewport || feedback || ping) {
+    if (ack || imageAcks.size || audioAck || audioReady || touches.length || signals.length || viewport || locationFix || feedback || ping) {
       if (blockedSince === null) blockedSince = now();
       if (now() - blockedSince >= 1500) { fail(); return; }
       if (timer === null) timer = schedule(() => { timer = null; flush(); }, 10);
@@ -275,14 +277,16 @@ export function createControlOutbox(socket, {
       else if (data.type === 'ping') ping = json;
       else if (data.type === 'rtc-feedback') feedback = json;
       else if (data.type === 'viewport') viewport = json;
-      else if (data.type === 'touch') {
+      else if (data.type === 'location') locationFix = json;
+      else if (data.type === 'touch' || data.type === 'input') {
         const tail = touches[touches.length - 1];
         // Only consecutive moves may be replaced; never cross a down/up/release boundary.
-        if (kind === 'move' && tail && tail.kind === 'move') tail.json = json;
-        else if (touches.length < 64) touches.push({ kind, json });
+        if (kind === 'move' && tail && tail.kind === 'move' && tail.type === data.type && tail.eventKind === data.kind) tail.json = json;
+        else if (touches.length < 64) touches.push({ kind, json, type: data.type, eventKind: data.kind });
         else { fail(); return false; }
-      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'phone-connect', 'image-format', 'media'].includes(data.type)) {
+      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'phone-connect', 'image-format', 'location-start', 'location-stop', 'location-clear', 'media', 'media-command'].includes(data.type)) {
         if (signals.length >= 8 || json.length > 32768) { fail(); return false; }
+        if (data.type.startsWith('location-')) locationFix = null;
         signals.push(json);
       } else return false;
       flush();
@@ -880,8 +884,13 @@ function ringPath(side) {
  * arc to 100 units, so a new reading is one number CSS can interpolate instead of a rebuilt shape.
  * A value that is merely small still leaves a stub, so it never reads as a missing stroke.
  */
+// An empty ring has to read as empty. At an offset of exactly one path length the round cap of the
+// dash sits on the arc's start and paints a dot back into the opening, and a gap the size of the dash
+// wraps the pattern onto the far end - both look like a sliver of progress in the wrong direction. So
+// the empty state stops a cap radius past 100, and the gap is long enough that the tail never returns.
+const ringEmpty = 107, ringDashArray = '100 300';
 const ringDash = percent =>
-  percent === null ? 100 : 100 - Math.max(percent > 0 ? 6 : 0, percent);
+  percent === null || percent <= 0 ? ringEmpty : 100 - Math.max(6, percent);
 
 // Both marks share one box, so switching networks never changes the icon's size. Every slot carries the
 // strength that lights it: the Wi-Fi fans fill from the inside out, the cellular bars from the left.
@@ -925,7 +934,7 @@ export function phoneStatusMarkup(values) {
   const { network, battery, volume, bars, batteryColor } = values;
   const ring = (side, name, color, percent) =>
     `<path class="${name}-track" d="${ringPath(side)}" stroke="${badgeTrack}"/>` +
-    `<path class="${name}-level" d="${ringPath(side)}" pathLength="100" stroke-dasharray="100 100"` +
+    `<path class="${name}-level" d="${ringPath(side)}" pathLength="100" stroke-dasharray="${ringDashArray}"` +
     ` stroke-dashoffset="${ringDash(percent)}" stroke="${color}"/>`;
   return '<svg viewBox="0 0 100 100" width="100%" height="100%" role="presentation">' +
     `<g class="rings" fill="none" stroke-width="${ringStroke}" stroke-linecap="round">` +
@@ -981,6 +990,8 @@ export function phoneStatusBadge(phone) {
 }
 
 import { createBrowserAudio } from './browser-audio.js';
+import { createBrowserLocation } from './browser-location.js';
+import { createBrowserMediaSession } from './browser-media-session.js';
 
 if (typeof document !== 'undefined') {
   const $ = id => document.getElementById(id);
@@ -1013,6 +1024,15 @@ if (typeof document !== 'undefined') {
   let heartbeat = null, movePending = false, moveGeneration = 0, outbox = null;
   let authGeneration = 0, deviceCredential = null, storageAvailable = false;
   let launchPresentation = null;
+  const locationOption = $('browser-location');
+  locationOption.checked = false; // Never inherit form restoration or grant consent through storage.
+  const browserLocation = createBrowserLocation({ send: data => send(data), onState(enabled, message, key) {
+    locationOption.checked = enabled;
+    $('location-status').textContent = message;
+    $('location-message').textContent = message;
+    $('location-message').hidden = !message || ['web_location_ready', 'web_location_active'].includes(key);
+  } });
+  locationOption.addEventListener('change', () => { void browserLocation.setEnabled(locationOption.checked); });
   const devicePreference = 'wheelplay.browserDevice';
   let pairingToken = null, qrGeneration = 0, qrTimer = null, qrRequest = null;
   let viewportReportTimer = null, lastViewportSignature = '';
@@ -1240,13 +1260,20 @@ if (typeof document !== 'undefined') {
   }
   $('refresh-qr').addEventListener('click', startQr);
   const pointers = new Map();
+  let maxTouchContacts = 2;
+  let pointerInput = false, keyboardInput = false;
   const send = (data, kind) => {
-    if (data.type === 'touch' && presentation.current.videoEpoch !== null) {
+    if ((data.type === 'touch' || data.type === 'input') && presentation.current.videoEpoch !== null) {
       const { sessionId, videoEpoch } = presentation.current;
       data = { ...data, sessionId, videoEpoch };
     }
     return outbox ? outbox.send(data, kind) : false;
   };
+  const desktop = createDesktopInput({ send, pointerEnabled: () => pointerInput,
+    keyboardEnabled: () => keyboardInput, interactive: () => live,
+    point: (event, surface, clamp) => mapPoint(event.clientX, event.clientY, surface.getBoundingClientRect(), width, height, clamp) });
+  let desktopRevision = presentation.current.revision;
+  const browserMedia = createBrowserMediaSession({ send });
   const browserAudio = createBrowserAudio({
     send,
     useElementSink: mediaSessionMode === '2',
@@ -1314,13 +1341,16 @@ if (typeof document !== 'undefined') {
   });
   function cancelMove() { moveGeneration++; movePending = false; }
   function contacts() { return [...pointers.values()].map(p => ({ id: p.id, x: p.x, y: p.y, down: true })); }
-  function release() { cancelMove(); pointers.clear(); send({ type: 'touch', contacts: [] }); }
+  function release() { cancelMove(); pointers.clear(); desktop.release(); send({ type: 'touch', contacts: [] }); }
   function renderPresentation(value) {
+    if (value.revision !== desktopRevision) {
+      desktop.release(false); desktopRevision = value.revision;
+    }
     live = value.interactive;
     for (const surface of [...screens, video, canvas, heldFrame].filter(Boolean)) surface.classList.toggle('stale', !value.visible);
     touchSurface.classList.toggle('stale', !live);
     $('waiting').hidden = value.visible;
-    if (!live && pointers.size) release();
+    if (!live && (pointers.size || desktop.active)) release();
     const rtcVisible = rtc && value.visible && value.frame?.transport === 'rtc';
     rendererStats.activeMode = rtcVisible ? launchMode : value.visible ? 'jpeg' : 'waiting';
     const rendererLabel = launchMode === 'native' ? 'Video' : t(launchMode === 'video-canvas' ? 'web_video_renderer_compat' : 'web_video_renderer_direct');
@@ -1406,7 +1436,8 @@ if (typeof document !== 'undefined') {
     clearTimeout(retry); clearInterval(heartbeat);
     if (socket) { const old = socket; socket = null; old.close(); }
     presentation.close(); cleanupRtc(); cleanupImage();
-    browserAudio.close(); $('audio-message').hidden = true;
+    browserMedia.close(); browserAudio.close(); $('audio-message').hidden = true;
+    browserLocation.close();
     renderPhoneStatus(null);
     $('topbar').hidden = false; $('pairing').hidden = false; $('display').hidden = true;
     syncDisplayZoom();
@@ -1518,7 +1549,7 @@ if (typeof document !== 'undefined') {
     $('connect').disabled = true;
     $('status').textContent = paired ? t("web_reconnecting") : t("web_connecting");
     const auth = pairingToken ? `token=${encodeURIComponent(pairingToken)}` : `code=${encodeURIComponent($('code').value)}`;
-    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/stream?${auth}&media=2&images=3`);
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/stream?${auth}&media=2&images=3&nowPlaying=1`);
     ws.binaryType = 'arraybuffer';
     const mode = launchMode;
     socket = ws;
@@ -1532,7 +1563,8 @@ if (typeof document !== 'undefined') {
         cancelMove(); pointers.clear(); presentation.close(); ws.close();
       } });
       paired = true; attempts = 0; lastStatus = Date.now();
-      browserAudio.attach();
+      browserMedia.open(); browserAudio.attach();
+      browserLocation.attach();
       cleanupRtc();
       presentation.open();
       webpSupport.then(supported => {
@@ -1582,12 +1614,14 @@ if (typeof document !== 'undefined') {
         if (Date.now() - lastStatus > 6000) { ws.close(); return; }
         send({ type: 'ping' });
         if (pointers.size) send({ type: 'touch', contacts: contacts() }, 'move');
+        desktop.heartbeat();
       }, 400);
     };
     ws.onmessage = event => {
       if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
       if (typeof event.data === 'string') {
         const data = JSON.parse(event.data);
+        if (browserMedia.receive(data)) return;
         if (browserAudio.control(data)) return;
         if (data.type === 'rtc-offer' || data.type === 'rtc-stop') {
           if (data.type === 'rtc-stop') rtcRequested = false;
@@ -1618,8 +1652,13 @@ if (typeof document !== 'undefined') {
           performanceStats.transport = data.performance?.transport ?? null;
           performanceStats.image = data.performance?.image ?? null;
           lastStatus = Date.now();
+          const nextTouchLimit = Number.isInteger(data.maxTouchContacts) ? Math.max(0, Math.min(10, data.maxTouchContacts)) : 2;
+          if (nextTouchLimit !== maxTouchContacts) { release(); maxTouchContacts = nextTouchLimit; }
           const previousRevision = presentation.current.revision;
           if (!presentation.status(data)) return;
+          if (previousRevision !== presentation.current.revision) desktop.release(false);
+          if (pointerInput !== (data.pointerInput === true) || keyboardInput !== (data.keyboardInput === true)) desktop.release();
+          pointerInput = data.pointerInput === true; keyboardInput = data.keyboardInput === true;
           if (previousRevision !== presentation.current.revision) {
             jpeg.cancelPending();
             if (rtcMedia.revision !== presentation.current.revision) { rtc.close(); rtcRequested = false; }
@@ -1661,8 +1700,10 @@ if (typeof document !== 'undefined') {
       if (socket !== ws) return;
       if (outbox) { outbox.close(); outbox = null; }
       cancelMove();
-      socket = null; pointers.clear(); clearInterval(heartbeat); presentation.close(); cleanupRtc(); cleanupImage();
-      browserAudio.close(); $('audio-message').hidden = true;
+      socket = null; pointers.clear(); desktop.release(false); pointerInput = false; keyboardInput = false;
+      clearInterval(heartbeat); presentation.close(); cleanupRtc(); cleanupImage();
+      browserMedia.close(); browserAudio.close(); $('audio-message').hidden = true;
+      browserLocation.close();
       renderPhoneStatus(null);
       if (stopped) return;
       if (!paired || ++attempts > 8) {
@@ -1751,13 +1792,16 @@ if (typeof document !== 'undefined') {
   });
   // A separate layer prevents Android Chrome's native video gestures cancelling drags.
   function bindSurface(surface) {
+  desktop.bind(surface);
   surface.addEventListener('contextmenu', event => event.preventDefault());
   surface.addEventListener('pointerdown', event => {
-    if (!live || pointers.size >= 2 || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    if (pointerInput && event.pointerType === 'mouse') return;
+    if (!live || pointers.size >= maxTouchContacts || (event.pointerType === 'mouse' && event.button !== 0)) return;
     const point = mapPoint(event.clientX, event.clientY, surface.getBoundingClientRect(), width, height);
     if (!point) return;
     event.preventDefault();
-    const id = [...pointers.values()].some(p => p.id === 0) ? 1 : 0;
+    const used = new Set([...pointers.values()].map(p => p.id));
+    let id = 0; while (used.has(id)) id++;
     pointers.set(event.pointerId, { id, ...point });
     surface.setPointerCapture(event.pointerId);
     cancelMove();

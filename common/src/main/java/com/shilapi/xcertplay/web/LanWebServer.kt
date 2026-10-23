@@ -6,8 +6,8 @@ import android.util.Base64
 import android.util.Log
 import com.shilapi.xcertplay.AirPlayPersistence
 import com.shilapi.xcertplay.CarPlayBackgroundSession
-import com.shilapi.xcertplay.airplay.AirPlayContact
 import com.shilapi.xcertplay.airplay.VideoCodec
+import com.shilapi.xcertplay.projection.ProjectionContact
 import com.shilapi.xcertplay.shared.R as UiR
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoWSD
@@ -27,6 +27,7 @@ internal class LanWebServer(
     port: Int = WebListenSettings.DEFAULT_HTTP_PORT,
     private val secure: Boolean = false,
     val pairing: QrPairing = QrPairing(),
+    private val mediaBridgeFactory: ((String) -> Unit) -> BrowserMediaBridge = { BrowserMediaBridge(send = it) },
 ) : NanoWSD("0.0.0.0", port) {
     init {
         require(port == 0 || port in 1024..65535) {
@@ -123,6 +124,15 @@ internal class LanWebServer(
         if (session.uri.startsWith("/pair/")) return servePairing(session)
         if (session.method != Method.GET)
             return response(Response.Status.METHOD_NOT_ALLOWED, "GET only")
+        if (session.uri == "/now-playing/artwork") {
+            val bytes = viewer?.artwork(session.parameters["id"]?.firstOrNull())
+                ?: return response(Response.Status.NOT_FOUND, "Not found")
+            return newFixedLengthResponse(Response.Status.OK, "image/jpeg", bytes.inputStream(), bytes.size.toLong()).apply {
+                addHeader("Cache-Control", "private, no-store")
+                addHeader("X-Content-Type-Options", "nosniff")
+                addHeader("Referrer-Policy", "no-referrer")
+            }
+        }
         if (session.uri == "/i18n.js")
             return newFixedLengthResponse(
                     Response.Status.OK,
@@ -171,8 +181,11 @@ internal class LanWebServer(
                 "/index.html" -> "index.html" to "text/html; charset=utf-8"
                 "/text.js" -> "text.js" to "text/javascript; charset=utf-8"
                 "/app.js" -> "app.js" to "text/javascript; charset=utf-8"
+                "/desktop-input.js" -> "desktop-input.js" to "text/javascript; charset=utf-8"
                 "/style.css" -> "style.css" to "text/css; charset=utf-8"
                 "/browser-audio.js" -> "browser-audio.js" to "text/javascript; charset=utf-8"
+                "/browser-location.js" -> "browser-location.js" to "text/javascript; charset=utf-8"
+                "/browser-media-session.js" -> "browser-media-session.js" to "text/javascript; charset=utf-8"
                 "/audio-worklet.js" -> "audio-worklet.js" to "text/javascript; charset=utf-8"
                 else -> return response(Response.Status.NOT_FOUND, "Not found")
             }
@@ -388,6 +401,16 @@ internal class LanWebServer(
     }
 
     private inner class Client(handshake: IHTTPSession) : WebSocket(handshake) {
+        private val nowPlayingEnabled = handshake.parameters["nowPlaying"]?.firstOrNull() == "1"
+        private val media = mediaBridgeFactory { text ->
+            if (!ended.get() && !closing.get() && viewer === this && authorized()) {
+                val kind = if (JSONObject(text).getString("type") == "now-playing")
+                    WebStreamSender.Control.NOW_PLAYING else WebStreamSender.Control.MEDIA_COMMAND_RESULT
+                reply(kind, text)
+            }
+        }
+        fun artwork(id: String?): ByteArray? =
+            if (nowPlayingEnabled && !ended.get() && !closing.get() && authorized()) media.artwork(id) else null
         private val token = handshake.parameters["token"]?.firstOrNull()?.takeIf { it.isNotEmpty() }
         private val mediaVersion = handshake.parameters["media"]?.firstOrNull()?.toIntOrNull()?.takeIf { it in 2..3 } ?: 1
         private val imageProtocol = if (mediaVersion == 2 && handshake.parameters["images"]?.firstOrNull() == "3") 3 else mediaVersion
@@ -633,6 +656,7 @@ internal class LanWebServer(
                     return
                 }
                 viewer = this
+                WebSession.location.attach(this, secure)
                 WebSession.viewerStateChanged()
                 WebSession.audio.attach(
                     this,
@@ -668,6 +692,7 @@ internal class LanWebServer(
                     },
                 )
             }
+            if (nowPlayingEnabled) media.start()
             sender.frameAvailable()
         }
 
@@ -700,6 +725,12 @@ internal class LanWebServer(
                 require(message.binaryPayload.size <= limit)
                 lastSeen = SystemClock.elapsedRealtime()
                 when (data.getString("type")) {
+                    "location-start", "location-stop", "location-clear", "location" ->
+                        WebSession.location.control(this, data)
+                    "media-command" -> {
+                        require(nowPlayingEnabled)
+                        media.command(data) { viewer === this && !closing.get() && authorized() }
+                    }
                     "audio-ready" -> {
                         val playback = data.getBoolean("playback")
                         val microphone = data.getBoolean("microphone")
@@ -784,6 +815,11 @@ internal class LanWebServer(
                                     .put("videoEpoch", media.videoEpoch)
                                     .put("sourceState", media.sourceState)
                                     .put("inputReady", media.inputReady)
+                                    .put("sourceId", media.sourceId)
+                                    .put("sourceName", media.sourceName)
+                                    .put("maxTouchContacts", media.maxTouchContacts)
+                                    .put("pointerInput", media.pointerInput)
+                                    .put("keyboardInput", media.keyboardInput)
                                     .put(
                                         "stage",
                                         if (WebSession.localDisplayActive) context.getString(UiR.string.web_displayed_on_phone)
@@ -1041,13 +1077,26 @@ internal class LanWebServer(
                                 stopRtc(retryable)
                             }
                         }
+                    "input" -> {
+                        val event = when (data.getString("kind")) {
+                            "pointer" -> com.shilapi.xcertplay.projection.ProjectionInput.Pointer(data.getDouble("x"), data.getDouble("y"), data.getInt("buttons"))
+                            "scroll" -> com.shilapi.xcertplay.projection.ProjectionInput.Scroll(data.getDouble("x"), data.getDouble("y"), data.getInt("dx"), data.getInt("dy"))
+                            "key" -> com.shilapi.xcertplay.projection.ProjectionInput.Key(data.getString("key"), data.getBoolean("down"))
+                            "release" -> com.shilapi.xcertplay.projection.ProjectionInput.Release
+                            "keepalive" -> com.shilapi.xcertplay.projection.ProjectionInput.KeepAlive
+                            else -> error("Unknown input event")
+                        }
+                        if (!versionedMedia || !WebSession.mediaInput(this, data.optLong("sessionId", -1),
+                            data.optLong("videoEpoch", -1), event, lastSeen))
+                            reply(WebStreamSender.Control.INPUT_UNAVAILABLE, """{"type":"input-unavailable"}""")
+                    }
                     "touch" -> {
                         val contacts = data.getJSONArray("contacts")
-                        require(contacts.length() <= 2)
+                        require(contacts.length() <= 10)
                         val list =
                             (0 until contacts.length()).map {
                                 val point = contacts.getJSONObject(it)
-                                AirPlayContact(
+                                ProjectionContact(
                                     point.getInt("id"),
                                     point.getDouble("x"),
                                     point.getDouble("y"),
@@ -1091,10 +1140,12 @@ internal class LanWebServer(
 
         private fun cleanup() {
             if (!ended.compareAndSet(false, true)) return
+            media.close()
             stopRtc()
             synchronized(this@LanWebServer) {
                 if (viewer === this) {
                     WebSession.audio.detach(this)
+                    WebSession.location.detach(this)
                     viewer = null
                 }
                 WebSession.touch.drop(this)

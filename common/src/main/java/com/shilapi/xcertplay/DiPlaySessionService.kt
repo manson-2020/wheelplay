@@ -21,12 +21,16 @@ import android.os.Looper
 import android.os.PowerManager
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.media.CarPlayMediaSessionBridge
+import com.shilapi.xcertplay.media.CarPlayMediaSource
 import com.shilapi.xcertplay.media.MediaCommand
+import com.shilapi.xcertplay.media.MediaCommandResult
 import com.shilapi.xcertplay.media.NowPlayingState
 import com.shilapi.xcertplay.shared.R as UiR
 import com.shilapi.xcertplay.web.RootAccess
 import com.shilapi.xcertplay.web.WebListenSettings
 import com.shilapi.xcertplay.web.WebSession
+import com.shilapi.xcertplay.projection.projectionSessions
+import java.util.concurrent.CompletableFuture
 
 /** Keeps the connection and its media session alive while no dashboard is visible. */
 class DiPlaySessionService : Service() {
@@ -35,13 +39,13 @@ class DiPlaySessionService : Service() {
     private var sessionSubscription: AutoCloseable? = null
     private val main = Handler(Looper.getMainLooper())
     private var destroyed = false
-    private var activationBlocked = false
     private var currentState = NowPlayingState()
     private var currentSession: MediaSession? = null
     private var currentArtwork: Bitmap? = null
 
     override fun onCreate() {
         super.onCreate()
+        com.shilapi.xcertplay.projection.registerProjectionSources(this)
         if (
             com.shilapi.xcertplay.web.TeslaHttpCompatibility.config(this).let {
                 it.enabled && it.mode == com.shilapi.xcertplay.network.TeslaHttpMode.ROOT
@@ -63,12 +67,14 @@ class DiPlaySessionService : Service() {
                 currentArtwork = artwork
                 if (!destroyed) updateNotification()
             }
+        browserMediaBridge = media
         sessionSubscription =
-            CarPlayBackgroundSession.subscribe { _ ->
+            projectionSessions.subscribe { _ ->
                 main.post {
                     if (!destroyed) {
-                        val current = CarPlayBackgroundSession.snapshot()
-                        media.bind(current?.controller, current?.sink)
+                        val current = projectionSessions.snapshot()
+                        media.bind(current?.media, current?.mediaOutput)
+                        updateNotification()
                     }
                 }
             }
@@ -81,35 +87,19 @@ class DiPlaySessionService : Service() {
         if (intent?.action == ACTION_STOP) {
             media.close()
             runWebAction { WebSession.stop() }
-            CarPlayBackgroundSession.stop()
+            projectionSessions.stop()
             stopSelf()
             return START_NOT_STICKY
         }
         if (
             intent?.action == ACTION_MEDIA &&
                 !currentState.available &&
-                !CarPlayBackgroundSession.hasSession()
+                !projectionSessions.hasSession()
         ) {
             stopSelf()
             return START_NOT_STICKY
         }
-        activationBlocked = false
         updateNotification()
-        // Foreground startup must be acknowledged even when an external start is rejected.
-        // Never open listeners or acquire a wake lock without a validated identity.
-        if (
-            !(DiPlayBootstrap.importing && WebSession.running) &&
-                runCatching { DiPlayBootstrap.ensure(this) }.isFailure
-        ) {
-            activationBlocked = true
-            WebSession.stop()
-            CarPlayBackgroundSession.stop()
-            wakeLock?.let { if (it.isHeld) it.release() }
-            wakeLock = null
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return START_NOT_STICKY
-        }
         if (intent?.action == ACTION_MEDIA) {
             if (intent.getLongExtra(EXTRA_GENERATION, -1) == media.commandGeneration) {
                 intent.getStringExtra(EXTRA_COMMAND)?.let { name ->
@@ -163,7 +153,7 @@ class DiPlaySessionService : Service() {
     }
 
     private fun updateNotification() {
-        if (destroyed || activationBlocked) return
+        if (destroyed) return
         val open =
             PendingIntent.getActivity(
                 this,
@@ -249,10 +239,13 @@ class DiPlaySessionService : Service() {
         val notification = builder.build()
         if (Build.VERSION.SDK_INT >= 29) {
             var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            if (currentState.available && currentState.playing)
+            if (currentState.available && currentState.playing ||
+                projectionSessions.snapshot()?.let { it.capabilities.audioPlayback && !it.capabilities.browserAudio } == true)
                 types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             if (
                 Build.VERSION.SDK_INT >= 30 &&
+                    projectionSessions.snapshot()?.capabilities?.microphone == true &&
+                    AirPlayPersistence.loadMicrophoneSource(this) != CarPlayMicrophoneSource.DISABLED &&
                     checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
                         PackageManager.PERMISSION_GRANTED
             ) {
@@ -264,16 +257,27 @@ class DiPlaySessionService : Service() {
 
     override fun onDestroy() {
         destroyed = true
+        if (browserMediaBridge === media) browserMediaBridge = null
         sessionSubscription?.close()
         media.close()
         runWebAction { WebSession.stop() }
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
-        CarPlayBackgroundSession.stop()
+        projectionSessions.stop()
         super.onDestroy()
     }
 
     companion object {
+        // Only accessed on the main thread, like the native MediaSession callbacks.
+        private var browserMediaBridge: CarPlayMediaSessionBridge? = null
+        internal fun browserMediaCommand(source: CarPlayMediaSource, generation: Long, command: MediaCommand): CompletableFuture<MediaCommandResult> =
+            browserMediaBridge?.browserCommand(source, generation, command)
+                ?: CompletableFuture.completedFuture(MediaCommandResult.UNAVAILABLE)
+
+        internal fun browserMediaSeek(source: CarPlayMediaSource, generation: Long, track: Long, positionMs: Long): CompletableFuture<MediaCommandResult> =
+            browserMediaBridge?.browserSeek(source, generation, track, positionMs)
+                ?: CompletableFuture.completedFuture(MediaCommandResult.UNAVAILABLE)
+
         const val ACTION_STOP = "com.shihab.diplay.DISCONNECT"
         private const val ACTION_MEDIA = "com.shilapi.xcertplay.MEDIA_COMMAND"
         private const val EXTRA_COMMAND = "command"
