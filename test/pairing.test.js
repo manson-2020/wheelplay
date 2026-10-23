@@ -35,7 +35,7 @@ function fixture({ status = () => ok({ state: 'pending' }), stored = null, resum
         setItem(key, value) { if (storageDisabled) throw new Error('denied'); preferences.set(key, value); },
         removeItem(key) { preferences.delete(key); },
       },
-    }, location: { host: 'server:8080', href }, URL, Date, WebSocket: Socket,
+    }, location: { host: 'server:8080', href, search }, URL, Date, WebSocket: Socket,
     setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
     clearTimeout(id) { timers.delete(id); }, clearInterval() {},
     fetch: async (url, options) => {
@@ -71,6 +71,22 @@ test('QR approval remembers the browser and waits for the explicit launch button
   assert.equal(f.element('hide-toolbar').checked, true);
   assert.equal(f.element('renderer-video-canvas').checked, true);
   assert.equal(f.requests.some(r => r.url.endsWith('/cancel')), false);
+});
+
+test('?auto=1 launches a remembered browser without the button', async () => {
+  const auto = fixture({ stored: savedDevice, search: '?auto=1' });
+  await flush(); await flush();
+  assert.equal(auto.sockets.length, 1);
+  assert.equal(auto.sockets[0].url, 'ws://server:8080/stream?token=resumed-token&media=2&images=3');
+  const manual = fixture({ stored: savedDevice });
+  await flush();
+  assert.equal(manual.sockets.length, 0);
+  assert.equal(manual.element('connect').disabled, false);
+  // An unpaired browser still waits for pairing instead of launching.
+  const fresh = fixture({ search: '?auto=1' });
+  await flush();
+  assert.equal(fresh.sockets.length, 0);
+  assert.equal(fresh.element('pair-qr').hidden, false);
 });
 
 test('late QR approval cannot replace a manual code connection', async () => {

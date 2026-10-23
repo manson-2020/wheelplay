@@ -109,6 +109,7 @@ internal class SettingsViewModel(
                     ToggleSetting.KEEP_SCREEN_ON to DiPlayPreferences.keepScreenOn(app),
                     ToggleSetting.ADAPTIVE_SIZE to AirPlayPersistence.loadAdaptiveBrowserSize(app),
                     ToggleSetting.HEVC to AirPlayPersistence.loadHevcEnabled(app),
+                    ToggleSetting.BLUETOOTH_AUDIO to AirPlayPersistence.loadBluetoothAudioPriority(app),
                     ToggleSetting.RIGHT_HAND to AirPlayPersistence.loadRightHandDrive(app),
                     ToggleSetting.HTTPS to WebListenSettings.httpsEnabled(app),
                     ToggleSetting.TESLA to TeslaHttpCompatibility.config(app).enabled,
@@ -275,6 +276,10 @@ internal class SettingsViewModel(
                 ToggleSetting.HEVC -> {
                     AirPlayPersistence.saveHevcEnabled(app, checked)
                     SettingsEffect.None
+                }
+                ToggleSetting.BLUETOOTH_AUDIO -> {
+                    AirPlayPersistence.saveBluetoothAudioPriority(app, checked)
+                    SettingsEffect.Reconnect()
                 }
                 ToggleSetting.RIGHT_HAND -> {
                     AirPlayPersistence.saveRightHandDrive(app, checked)

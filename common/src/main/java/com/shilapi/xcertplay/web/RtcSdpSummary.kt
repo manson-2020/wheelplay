@@ -12,11 +12,15 @@ internal object RtcSdpSummary {
         val setup: String,
         val candidates: String,
         val profileLevelId: String?,
+        /** Every negotiated media line, e.g. `video:1,application:1`. */
+        val mediaLines: String = "",
     ) {
         /** True for Main/High H.264, which baseline-only head-unit decoders reject. */
         val mainOrHighProfile get() = profileLevelId?.let { it.startsWith("4d") || it.startsWith("64") } == true
 
-        fun describe() = "media=$media codecs=$codecs setup=$setup candidates=$candidates"
+        fun describe() =
+            "media=$media codecs=$codecs setup=$setup candidates=$candidates" +
+                if (mediaLines.isEmpty()) "" else " mlines=$mediaLines"
     }
 
     fun summarize(sdp: String?): Summary {
@@ -56,6 +60,12 @@ internal object RtcSdpSummary {
             }
         }
         val profile = Regex("profile-level-id=([0-9a-fA-F]{6})").find(fmtp.orEmpty())?.groupValues?.getOrNull(1)?.lowercase()
-        return Summary(media, codecs, setup, "host:$host,srflx:$srflx,relay:$relay,mdns:$mdns", profile)
+        // An unexpected m=audio here is how a head unit ends up stealing the car's media audio.
+        val kinds =
+            lines.filter { it.startsWith("m=") }
+                .map { it.removePrefix("m=").substringBefore(' ').ifEmpty { "application" } }
+                .groupingBy { it }.eachCount()
+        val mediaLines = kinds.entries.joinToString(",") { "${it.key}:${it.value}" }
+        return Summary(media, codecs, setup, "host:$host,srflx:$srflx,relay:$relay,mdns:$mdns", profile, mediaLines)
     }
 }

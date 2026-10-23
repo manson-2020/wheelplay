@@ -29,6 +29,13 @@ internal fun AudioSettingsScreen(state: SettingsState, actions: SettingsActions)
     )
     Text(state.runtime.audioStatus, style = MaterialTheme.typography.bodyMedium)
     SettingsDescription(R.string.settings_audio_output_description)
+    SettingsToggle(
+        state,
+        actions,
+        ToggleSetting.BLUETOOTH_AUDIO,
+        R.string.settings_bluetooth_audio,
+        R.string.settings_bluetooth_audio_description,
+    )
     SettingsChoice(
         state,
         actions,

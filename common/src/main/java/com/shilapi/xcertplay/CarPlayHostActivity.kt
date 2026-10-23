@@ -2783,6 +2783,18 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun normalizedModel(): String =
         model.trim().ifBlank { AirPlayPersistence.DEFAULT_MODEL }
 
+    /**
+     * Some head units terminate the phone's A2DP link as soon as the browser plays media, which
+     * costs both Bluetooth audio and the steering wheel keys. When the user keeps audio on Android
+     * and asks for Bluetooth priority, stay on the image transport that does not claim media.
+     */
+    private fun effectiveStreamTechnology(): com.shilapi.xcertplay.web.StreamTechnology =
+        if (streamTechnology == com.shilapi.xcertplay.web.StreamTechnology.WEBRTC &&
+            AirPlayPersistence.loadBluetoothAudioPriority(this) &&
+            !AirPlayPersistence.loadBrowserAudioPlayback(this)
+        ) com.shilapi.xcertplay.web.StreamTechnology.JPEG
+        else streamTechnology
+
     private fun createMediaSink(
         videoWidth: Int,
         videoHeight: Int,
@@ -2791,7 +2803,7 @@ class CarPlayHostActivity : ComponentActivity() {
         // Capture this session's log: late decoder shutdown must not write into a new session.
         val diagnosticLog = sessionLog
         val videoGeneration = WebSession.beginVideo(videoWidth, videoHeight)
-        val source = com.shilapi.xcertplay.web.WebVideoSource(streamTechnology)
+        val source = com.shilapi.xcertplay.web.WebVideoSource(effectiveStreamTechnology())
         WebSession.attachVideoSource(videoGeneration, source)
         val output = OffscreenVideoOutput(videoWidth, videoHeight,
             wanted = { WebSession.hasViewer && source.jpegNeeded },

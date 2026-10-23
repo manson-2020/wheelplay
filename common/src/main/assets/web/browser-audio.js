@@ -37,6 +37,7 @@ export function createBrowserAudio({
   createContext = () => new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' }),
   getMicrophone = () => navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }),
   createWorklet = context => new AudioWorkletNode(context, 'wheelplay-microphone', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] }),
+  useElementSink = false, createAudio = () => new Audio(),
   secure = () => window.isSecureContext && location.protocol === 'https:' && !!navigator.mediaDevices?.getUserMedia,
 } = {}) {
   let context = null, playback = false, microphone = false, connected = false;
@@ -44,7 +45,21 @@ export function createBrowserAudio({
   let desiredPlayback = false, desiredMicrophone = false, gestureRetry = false;
   let mediaBufferMillis = 300;
   let stream = null, source = null, worklet = null, micId = null, micSequence = 0;
+  let elementSink = null;
   const streams = new Map(), nodes = new Set();
+  // Chrome only routes platform media keys to a tab whose HTMLMediaElement is playing audio, so
+  // `?ms=2` moves the WebAudio output behind a media element instead of the raw context sink.
+  function outputNode(audio) {
+    if (!useElementSink) return audio.destination;
+    if (!elementSink) {
+      const destination = audio.createMediaStreamDestination();
+      const element = createAudio();
+      element.autoplay = true; element.srcObject = destination.stream;
+      try { const playing = element.play?.(); if (playing?.catch) playing.catch(() => {}); } catch (_) {}
+      elementSink = { destination, element };
+    }
+    return elementSink.destination;
+  }
   function state(error = '') { onState({ playback, microphone, connected, error }); }
   function readyState() { if (connected) send({ type: 'audio-ready', playback, microphone }); }
   async function ready() {
@@ -126,7 +141,7 @@ export function createBrowserAudio({
       for (let i = 0; i < count; i++) output[i] = frame.pcm[i * frame.channels + channel] / 32768;
     }
     const node = context.createBufferSource(); node.buffer = audioBuffer; node.stream = frame.stream; node.media = frame.media;
-    node.connect(context.destination); nodes.add(node);
+    node.connect(outputNode(context)); nodes.add(node);
     node.onended = () => { nodes.delete(node); node.disconnect(); };
     node.start(next); streams.set(frame.stream, next + count / frame.rate);
     return true;
@@ -167,6 +182,7 @@ export function createBrowserAudio({
     desiredPlayback = desiredMicrophone = gestureRetry = false;
     mediaBufferMillis = 300;
     stopMicrophone(); stopPlayback();
+    if (elementSink) { try { elementSink.element.pause?.(); } catch (_) {} elementSink.element.srcObject = null; elementSink = null; }
     const old = context; context = null; old?.close().catch(() => {}); state();
   }
   return { receive, control, close,

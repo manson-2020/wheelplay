@@ -169,3 +169,28 @@ test('insecure page cannot request a browser microphone; secure capture stops an
   audio.control({ type: 'audio-route', playback: false, microphone: false });
   assert.equal(stopped, 1); assert.equal(controls.at(-1).microphone, false);
 });
+
+test('the media element sink plays WebAudio through a playing element for media keys', async () => {
+  const connected = [], stream = { label: 'media-stream' }, destination = { label: 'stream-destination', stream };
+  const context = {
+    state: 'running', currentTime: 0, destination: { label: 'raw' },
+    async resume() {}, async close() {},
+    createMediaStreamDestination: () => destination,
+    createBuffer(channels, count) { const data = new Float32Array(count); return { getChannelData: () => data }; },
+    createBufferSource() {
+      return { connect(target) { connected.push(target); }, disconnect() {}, start() {}, stop() {} };
+    },
+  };
+  const element = { autoplay: false, srcObject: null, played: 0, paused: false,
+    play() { this.played++; return Promise.resolve(); }, pause() { this.paused = true; } };
+  const audio = createBrowserAudio({ send() {}, createContext: () => context,
+    useElementSink: true, createAudio: () => element });
+  audio.attach(); audio.control({ type: 'audio-route', playback: true, microphone: false, mediaBufferMillis: 300 });
+  await new Promise(resolve => setImmediate(resolve));
+  audio.receive(packet(new Int16Array(960).fill(7), 1, { media: true }));
+  assert.deepEqual(connected, [destination]);
+  assert.equal(element.srcObject, stream);
+  assert.equal(element.played, 1);
+  audio.close();
+  assert.equal(element.paused, true);
+});

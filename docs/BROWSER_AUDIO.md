@@ -8,6 +8,27 @@
 2. 在车机浏览器或系统中按其支持的方式信任此证书。随后打开页面提供的 `https://设备地址:HTTPS端口/` 链接（默认 `8443`），重新配对。
 3. 在 App「麦克风来源」选择「浏览器麦克风」，重新连接 iPhone，并按浏览器提示授权。仅在 iPhone 发起通话或语音输入并要求麦克风数据时，浏览器采样才会发送到服务端。
 
+## 车机蓝牙音频与 WebRTC 互斥
+
+实测（Tesla 车机）：一旦浏览器开始播放媒体，车机会主动断开手机的蓝牙音频链路（A2DP 对端为 Sink，
+日志为 `BTIF_AV_ACL_DISCONNECTED`，reason 为 Remote Terminated Connection），发生在 WebRTC 直连建立后
+1–2 秒，原生 Video 与直接 Canvas 两种渲染方式都会触发。这与路由设置无关：协商只有一路视频
+（offer / answer 均 `mlines=video:1`），音频输出为安卓设备时服务端也不会向浏览器发 PCM。
+需要同时保住蓝牙音频和方向盘切歌时，在「设置 → 音频与麦克风」开启「蓝牙音频优先」：
+音频输出为安卓设备时画面保持使用 JPEG／WebP 图片串流，不使用 WebRTC 直通，重新连接 iPhone 后生效；
+音频输出为车机浏览器时该开关不改变行为。
+
+## 方向盘媒体键（`?ms=1`）
+
+网页在 `?ms=1` 时注册 `navigator.mediaSession`（播放/暂停/上一曲/下一曲/快进快退），动作经 WebSocket 发
+`{"type":"media","action":"pause"}`；服务端映射为 CarPlay 媒体命令（PLAY / PAUSE / NEXT / PREVIOUS）并下发 iPhone，
+快进快退无对应 HID 命令，返回 `UNMAPPED`。手机把最近一次执行结果回给网页，`?diag=1` 面板显示
+`last=<动作> media=<动作>→<结果>`（SENT / UNMAPPED / NO_SESSION / 结果枚举）；歌名与艺人由手机的 NowPlaying
+状态回填到 `mediaSession.metadata`，播放状态同步 `playbackState`。不带 `?ms` 时网页不注册媒体会话，行为不变。
+
+实测边界：Tesla 车机只把「播放/暂停」投递给浏览器媒体会话，「上一曲/下一曲」既不到 media session 也无 keydown
+（切歌属 AVRCP 命令，只在蓝牙音频在线时发给手机），因此需要方向盘切歌仍须用「蓝牙音频优先」+ 图片串流。
+
 ## 显示和离线行为
 
 在「设置 → 画面与串流」中，「CarPlay 昼夜模式」可选跟随 Android、始终日间、始终夜间，即时发送给 iPhone，并在下一次会话重新应用。「画面安全区域」可预览和设置四边 0–40% 留白，按协商画面比例缩放，保存后重新连接；也可恢复全屏。留白控制 iPhone 的布局安全区域，触控仍使用完整画面坐标。旧版按分辨率保存的安全区域保留至用户修改。

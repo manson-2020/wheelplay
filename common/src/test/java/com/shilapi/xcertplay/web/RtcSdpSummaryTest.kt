@@ -35,7 +35,23 @@ class RtcSdpSummaryTest {
         assertEquals("host:2,srflx:1,relay:0,mdns:1", summary.candidates)
         assertEquals("42e01f", summary.profileLevelId)
         assertFalse(summary.mainOrHighProfile)
-        assertTrue(summary.describe().contains("media=video:9"))
+        assertEquals("video:1", summary.mediaLines)
+        assertTrue(summary.describe().contains("mlines=video:1"))
+    }
+
+    @Test fun mediaLineCensusExposesAnUnexpectedAudioSection() {
+        val summary =
+            RtcSdpSummary.summarize(
+                """
+                m=audio 9 UDP/TLS/RTP/SAVPF 111
+                a=rtpmap:111 opus/48000/2
+                m=video 9 UDP/TLS/RTP/SAVPF 96
+                a=rtpmap:96 H264/90000
+                m=application 9 UDP/DTLS/SCTP webrtc-datachannel
+                """.trimIndent(),
+            )
+        assertEquals("audio:1,video:1,application:1", summary.mediaLines)
+        assertTrue(summary.describe().endsWith("mlines=audio:1,video:1,application:1"))
     }
 
     @Test

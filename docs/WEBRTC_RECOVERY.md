@@ -16,6 +16,12 @@ WebRTC 视频直通省去 Android 解码、像素读取和 JPEG 压缩，但稳�
 
 静态画面没有新帧是正常现象。恢复更新时，浏览器不会把之前的静止时长计入解码停顿；发送队列等待关键帧时也会排除源画面的长时间暂停。解码恢复或连接恢复后，本次异常的计时会重置，已取消的定时器不会关闭后续会话。
 
+## 与车机蓝牙音频的冲突
+
+部分车机（已实测 Tesla）在浏览器开始播放媒体后会主动断开手机的 A2DP 链路，方向盘切歌随之失效；
+断开发生在直连建立后 1–2 秒，与渲染方式（原生 Video / 兼容 Canvas / 直接 Canvas）无关，且协商中并无音频
+m-line。需要蓝牙音频时，在「设置 → 音频与麦克风」开启「蓝牙音频优先」，音频输出为安卓设备时保持图片串流。
+
 ## 设置与边界
 
 「设置 → 画面与串流 → WebRTC 卡顿容忍时间」提供 **4 秒、10 秒（默认）、30 秒**。下次浏览器连接生效，策略随 `rtc-offer.recoveryGraceMs` 传到网页，浏览器与发送端使用同一策略。旧网页不支持该字段时，仍可能按旧逻辑提前回退，更新 App 后应刷新网页。
@@ -57,8 +63,13 @@ WebRTC 的 ICE socket 绑定到本次 WebSocket 连接在本机的 IPv4 地址�
 用域名访问时同样有效；环回 / 链路本地地址不算），而不是默认的任意地址。这样兼容地址（如免 Root VPN 的 `6.6.6.6`）的 STUN 回包源地址与车机
 发送目标一致，避免回包从热点地址发出而被丢弃。地址不是本机接口、为环回 / 链路本地或
 绑定失败时保持任意地址，行为与旧版相同。`?diag=1` 状态行与 `rtc-offer` 日志都会记录 `bind=<地址|any>`；
-`first-frame-timeout` 还会附带 `conn` / `ice` / `gather` / `track` 与 offer 的 `profile=`。仍需在目标
-车机上验证 UDP 可达性。
+`first-frame-timeout` 还会附带 `conn` / `ice` / `gather` / `track` 与 offer 的 `profile=`。
+
+真机已验证（Tesla 车机 + 免 Root VPN 别名）：未绑定时 offer 通告 5 个 host 候选、每轮都在
+answer 后 10 秒 `first-frame timeout`；绑定后 `rtc-bind local=6.6.6.6 bound=6.6.6.6`，offer 只剩
+1 个候选（就是车机能访问的别名地址），answer 后 53 ms 即 `direct stream connected`，
+H.264 与 H.265 都能直连。两个前提条件容易漏：别名所在的 TUN 状态是 DOWN（不能按 `isUp`
+过滤），双栈 socket 的本地地址可能是 `::ffff:a.b.c.d` 写法。
 
 ## 失败归因（reason / rtc-diag）
 

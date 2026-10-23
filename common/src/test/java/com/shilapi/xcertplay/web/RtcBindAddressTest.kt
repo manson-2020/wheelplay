@@ -9,6 +9,9 @@ class RtcBindAddressTest {
     @Test fun bindsToTheAddressTheBrowserReached() {
         assertEquals("6.6.6.6", RtcBindAddress.addressForConnection("6.6.6.6", local))
         assertEquals("192.168.43.1", RtcBindAddress.addressForConnection("192.168.43.1", local))
+        // A dual-stack server socket reports the same peer as an IPv4-mapped IPv6 literal.
+        assertEquals("6.6.6.6", RtcBindAddress.addressForConnection("::ffff:6.6.6.6", local))
+        assertEquals("6.6.6.6", RtcBindAddress.addressForConnection("[::ffff:6.6.6.6]", local))
     }
 
     @Test fun ignoresAddressesThatCannotReachAHeadUnit() {

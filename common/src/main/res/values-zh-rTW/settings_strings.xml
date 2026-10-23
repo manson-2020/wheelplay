@@ -56,6 +56,8 @@
     <string name="settings_buffer_stable">1000 ms · 更穩定</string>
     <string name="settings_audio_output">音訊輸出</string>
     <string name="settings_audio_output_description">即時切換。瀏覽器未就緒或離線時回退 Android；瀏覽器可能需要點選頁面才能播放聲音。</string>
+    <string name="settings_bluetooth_audio">藍芽音訊優先</string>
+    <string name="settings_bluetooth_audio_description">部分車機在瀏覽器開始播放影片後會斷掉手機的藍芽音訊，方向盤切歌也隨之失效。當「音訊輸出」為「安卓裝置」時，畫面會保持使用 JPEG／WebP 圖片串流而不使用 WebRTC 直通。重新連接 iPhone 後生效。</string>
     <string name="settings_microphone">麥克風來源</string>
     <string name="settings_microphone_description">修改後重新連線。瀏覽器麥克風需要可信 HTTPS 和授權，未就緒時回退 Android；禁用會停止上傳並取消麥克風能力宣告。</string>
     <string name="settings_appearance">CarPlay 晝夜模式</string>

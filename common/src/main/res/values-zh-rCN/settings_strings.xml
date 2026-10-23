@@ -55,6 +55,8 @@
     <string name="settings_buffer_default">300 ms · 默认</string>
     <string name="settings_buffer_stable">1000 ms · 更稳定</string>
     <string name="settings_audio_output">音频输出</string>
+    <string name="settings_bluetooth_audio">蓝牙音频优先</string>
+    <string name="settings_bluetooth_audio_description">部分车机在浏览器开始播放视频后会断开手机的蓝牙音频，方向盘切歌也随之失效。当「音频输出」为「安卓设备」时，画面会保持使用 JPEG／WebP 图片串流而不使用 WebRTC 直通。重新连接 iPhone 后生效。</string>
     <string name="settings_audio_output_description">即时切换。浏览器未就绪或离线时回退 Android；浏览器可能需要点击页面才能播放声音。</string>
     <string name="settings_microphone">麦克风来源</string>
     <string name="settings_microphone_description">修改后重新连接。浏览器麦克风需要可信 HTTPS 和授权，未就绪时回退 Android；禁用会停止上传并取消麦克风能力声明。</string>

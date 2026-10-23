@@ -37,6 +37,7 @@ object AirPlayPersistence {
     private const val KEY_DISPLAY_SCALE_TENTHS = "display_scale_tenths"
     private const val KEY_UI_SCALE_PERCENT = "ui_scale_percent"
     private const val KEY_HEVC_ENABLED = "hevc_enabled"
+    private const val KEY_BLUETOOTH_AUDIO_PRIORITY = "bluetooth_audio_priority"
     private const val KEY_HEVC_SOFTWARE_DECODER = "hevc_software_decoder"
     private const val KEY_ADVANCED_AUDIO_CHANNEL_MAPPING = "advanced_audio_channel_mapping"
     private const val KEY_WIRELESS_ENABLED = "wireless_enabled"
@@ -217,6 +218,17 @@ object AirPlayPersistence {
     fun saveHevcEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_HEVC_ENABLED, enabled)
+            .apply()
+    }
+
+    /** Head units that drop Bluetooth audio while the browser plays media need the image path. */
+    fun loadBluetoothAudioPriority(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_BLUETOOTH_AUDIO_PRIORITY, false)
+
+    fun saveBluetoothAudioPriority(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_BLUETOOTH_AUDIO_PRIORITY, enabled)
             .apply()
     }
 

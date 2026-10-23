@@ -3,6 +3,7 @@ package com.shilapi.xcertplay.web
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import com.shilapi.xcertplay.CarPlayBackgroundSession
 import com.shilapi.xcertplay.airplay.AirPlayContact
 import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.shared.R as UiR
@@ -394,7 +395,9 @@ internal class LanWebServer(
         private var imageFallback = false
         // The address this browser reached us on; ICE must answer from it. VPN aliases such as
         // the Tesla compatibility address are local but not on the hotspot interface.
-        private val rtcBindAddress = RtcBindAddress.forAddress(connectionAddress.get())
+        private val rtcBindAddress = RtcBindAddress.forAddress(connectionAddress.get()).also {
+            Log.i("WheelPlayWeb", "rtc-bind local=${connectionAddress.get() ?: "none"} bound=${it ?: "any"}")
+        }
 
         fun authorized() = token == null || pairing.authorized(token)
 
@@ -442,6 +445,8 @@ internal class LanWebServer(
         // Kept across retries and cleared only by a displayed frame: a head unit photo taken
         // between attempts must still show why the previous attempt stopped.
         private var rtcLastFallback: String? = null
+        // Last forwarded Media Session action and its CarPlay result, echoed back to ?diag=1.
+        private var mediaEcho: String? = null
         private var rtcHint: String? = null
         private var hevcSupported = true
         private var rtcAvailableSince = 0L
@@ -798,9 +803,24 @@ internal class LanWebServer(
                                             rtcDiagnostics,
                                             rtcFallbackStates,
                                             rtcOffer?.profileLevelId?.let { "profile=$it" },
-                                            rtcAnswer?.let { "answer=${it.media} setup=${it.setup} ${it.candidates}" },
+                                            rtcAnswer?.let {
+                                                "answer=${it.media} setup=${it.setup} ${it.candidates}" +
+                                                    if (it.mediaLines.isEmpty()) "" else " ${it.mediaLines}"
+                                            },
                                             rtcLastFallback,
                                         ).joinToString(" "),
+                                    )
+                                    .put(
+                                        "media",
+                                        JSONObject().apply {
+                                            mediaEcho?.let { put("echo", it) }
+                                            CarPlayBackgroundSession.snapshot()?.controller
+                                                ?.mediaSnapshot()?.let { playing ->
+                                                    playing.title?.let { put("title", it.take(80)) }
+                                                    playing.artist?.let { put("artist", it.take(80)) }
+                                                    put("playing", playing.playing)
+                                                }
+                                        },
                                     )
                                     .put("rtcRetryAfterMs", rtcRetry.retryAfterMs)
                                     .put("rtcRetryBlocked", rtcRetry.blocked)
@@ -830,6 +850,28 @@ internal class LanWebServer(
                                     .toString(),
                             )
                         }
+                    }
+                    "media" -> {
+                        val action = data.getString("action").take(24)
+                        require(action.all { it.isLetterOrDigit() })
+                        val command = WebMediaKeys.command(action)
+                        val controller = CarPlayBackgroundSession.snapshot()?.controller
+                        val echo =
+                            when {
+                                command == null -> "media=$action→UNMAPPED"
+                                controller == null -> "media=$action→NO_SESSION"
+                                else -> {
+                                    controller.sendMediaCommand(command)
+                                        .whenComplete { result, _ ->
+                                            val outcome = "media=$action→${result ?: "FAILED"}"
+                                            synchronized(rtcLock) { mediaEcho = outcome }
+                                            Log.i("WheelPlayWeb", "media $outcome t=${SystemClock.elapsedRealtime()}")
+                                        }
+                                    "media=$action→SENT"
+                                }
+                            }
+                        mediaEcho = echo
+                        Log.i("WheelPlayWeb", "media $echo t=${SystemClock.elapsedRealtime()}")
                     }
                     "rtc-start" -> startRtc()
                     "rtc-answer" ->

@@ -48,6 +48,7 @@ internal enum class ToggleSetting {
     KEEP_SCREEN_ON,
     ADAPTIVE_SIZE,
     HEVC,
+    BLUETOOTH_AUDIO,
     RIGHT_HAND,
     HTTPS,
     TESLA,

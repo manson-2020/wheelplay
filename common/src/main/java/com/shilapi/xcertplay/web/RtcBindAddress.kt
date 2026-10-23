@@ -25,11 +25,14 @@ internal object RtcBindAddress {
         return local.firstOrNull { it.equals(parsed.hostAddress, ignoreCase = true) }
     }
 
-    /** IPv4 literals only; loopback and link-local addresses cannot reach a head unit. */
+    /** IPv4 literals only, including the IPv4-mapped form a dual-stack socket reports; loopback
+     * and link-local addresses cannot reach a head unit. */
     private fun literal(text: String?): Inet4Address? {
-        val raw = text?.trim() ?: return null
-        if (!ipv4.matches(raw)) return null
-        val octets = raw.split(".")
+        val raw = text?.trim()?.removePrefix("[")?.removeSuffix("]") ?: return null
+        val host = raw.substringBefore('%')
+            .let { if (it.startsWith("::ffff:", ignoreCase = true)) it.substring(7) else it }
+        if (!ipv4.matches(host)) return null
+        val octets = host.split(".")
         if (octets.any { value -> value.toIntOrNull()?.let { it !in 0..255 } != false }) return null
         val parsed =
             runCatching {
@@ -51,8 +54,10 @@ internal object RtcBindAddress {
 
     private fun localAddresses(): List<String> =
         runCatching {
+            // The Tesla compatibility alias lives on a TUN that stays DOWN, so `isUp` would
+            // reject exactly the address that has to be bound.
             java.util.Collections.list(NetworkInterface.getNetworkInterfaces())
-                .filter { it.isUp && !it.isLoopback }
+                .filter { !it.isLoopback }
                 .flatMap { java.util.Collections.list(it.inetAddresses) }
                 .mapNotNull { it.hostAddress }
         }.getOrDefault(emptyList())

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapPoint, pairingCodeFromUrl, unzoomedDisplayRect, browserViewportSize } from '../common/src/main/assets/web/app.js';
+import { mapPoint, pairingCodeFromUrl, unzoomedDisplayRect, browserViewportSize, createMediaSessionProbe } from '../common/src/main/assets/web/app.js';
 
 test('landscape pillarbox is excluded and video center maps correctly', () => {
   const rect = { left: 10, top: 80, width: 1600, height: 600 };
@@ -55,4 +55,22 @@ test('viewport negotiation preserves aspect while fitting Android dimension limi
     assert.ok(size.width / size.height >= 0.5 && size.width / size.height <= 4);
     assert.equal(size.width % 2 + size.height % 2, 0);
   }
+});
+
+test('the media session probe forwards actions and applies server metadata', () => {
+  const handlers = {}, sent = [];
+  const session = { metadata: null, playbackState: '', setActionHandler: (name, fn) => { handlers[name] = fn; } };
+  const probe = createMediaSessionProbe({ session, send: message => sent.push(message), now: () => 5000 });
+  assert.equal(probe.available, true);
+  assert.deepEqual(Object.keys(handlers).sort(),
+    ['nexttrack', 'pause', 'play', 'previoustrack', 'seekbackward', 'seekforward'].sort());
+  assert.deepEqual(session.metadata, { title: 'WheelPlay', artist: 'CarPlay' });
+  assert.equal(session.playbackState, 'playing');
+  handlers.nexttrack(); handlers.play();
+  assert.deepEqual(sent, [{ type: 'media', action: 'nexttrack' }, { type: 'media', action: 'play' }]);
+  assert.deepEqual(probe.last, { action: 'play', at: 5000 });
+  probe.apply({ title: '慢懂', artist: '汪苏泷', playing: false });
+  assert.deepEqual(session.metadata, { title: '慢懂', artist: '汪苏泷' });
+  assert.equal(session.playbackState, 'paused');
+  assert.equal(createMediaSessionProbe({ send() {}, session: null }).available, false);
 });

@@ -281,7 +281,7 @@ export function createControlOutbox(socket, {
         if (kind === 'move' && tail && tail.kind === 'move') tail.json = json;
         else if (touches.length < 64) touches.push({ kind, json });
         else { fail(); return false; }
-      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'phone-connect', 'image-format'].includes(data.type)) {
+      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'phone-connect', 'image-format', 'media'].includes(data.type)) {
         if (signals.length >= 8 || json.length > 32768) { fail(); return false; }
         signals.push(json);
       } else return false;
@@ -290,6 +290,37 @@ export function createControlOutbox(socket, {
     },
     close,
   };
+}
+
+// Verification bridge for head-unit steering wheel media keys. Chrome only hands those keys to
+// the tab that owns the platform media session, so this registers the handlers and reports every
+// action back over the control socket: the phone log then separates "the key never reached the
+// page" from "the page got it but the rest of the chain failed". No playback control yet.
+export function createMediaSessionProbe({
+  session = typeof navigator !== 'undefined' ? navigator.mediaSession : null,
+  send, onAction = () => {}, now = () => Date.now(),
+  actions = ['play', 'pause', 'nexttrack', 'previoustrack', 'seekbackward', 'seekforward'],
+} = {}) {
+  if (!session || typeof session.setActionHandler !== 'function') {
+    return { available: false, last: null, apply() {} };
+  }
+  let last = null;
+  function apply(media = {}) {
+    try {
+      const fields = { title: String(media.title || 'WheelPlay'), artist: String(media.artist || 'CarPlay') };
+      session.metadata = typeof MediaMetadata === 'function' ? new MediaMetadata(fields) : fields;
+      session.playbackState = media.playing === false ? 'paused' : 'playing';
+    } catch (_) {}
+  }
+  apply();
+  for (const action of actions) {
+    try {
+      session.setActionHandler(action, () => {
+        last = { action, at: now() }; onAction(action); send({ type: 'media', action });
+      });
+    } catch (_) {}
+  }
+  return { available: true, apply, get last() { return last; } };
 }
 
 // Keep the decoder in the DOM, outside the viewport. display:none/hidden can
@@ -793,6 +824,10 @@ if (typeof document !== 'undefined') {
   const queryFlag = name => new RegExp(`(?:^|[?&])${name}=1(?:&|$)`).test(String(location.search || ''));
   const diagnosticStatus = queryFlag('diag');
   const keepVideoVisible = queryFlag('unhide');
+  const autoLaunch = queryFlag('auto');
+  // `?ms=1` registers a Media Session; `?ms=2` additionally plays browser audio through a media
+  // element, which is what Chrome requires before it routes platform media keys to the page.
+  const mediaSessionMode = (String(location.search || '').match(/[?&]ms=([12])(?:&|$)/) || [])[1] || '';
   const screen = $('screen');
   const screens = [screen, $('screen-next'), $('screen-third')];
   const heldFrame = $('held-frame');
@@ -808,6 +843,7 @@ if (typeof document !== 'undefined') {
   let rtc = null, rtcRequested = false, rtcFps = null;
   // Latest server-side WebRTC hint and capability snapshot, kept for the ?diag=1 status line.
   let serverRtcHint = '', serverRtcDiag = '';
+  let serverMedia = null;
   let socket = null, stopped = true, paired = false, retry = null, attempts = 0;
   let width = 1280, height = 720, live = false, lastStatus = 0, rtcMedia = {};
   let heartbeat = null, movePending = false, moveGeneration = 0, outbox = null;
@@ -919,6 +955,8 @@ if (typeof document !== 'undefined') {
     $('connect-label').textContent = t("web_start_display");
     $('connect').disabled = false;
     $('status').textContent = t("web_paired_ready_to_start"); $('message').textContent = '';
+    // `?auto=1` skips the launch page: a restored pairing starts with the remembered options.
+    if (autoLaunch && pairingToken) launch();
   }
   function showPairingEntry() {
     $('remembered-device').hidden = true;
@@ -1047,6 +1085,7 @@ if (typeof document !== 'undefined') {
   };
   const browserAudio = createBrowserAudio({
     send,
+    useElementSink: mediaSessionMode === '2',
     sendBinary: packet => {
       if (socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 8192) return false;
       try { socket.send(packet); return true; } catch (_) { return false; }
@@ -1057,6 +1096,15 @@ if (typeof document !== 'undefined') {
     },
   });
   document.addEventListener('pointerdown', () => browserAudio.unlock(), { capture: true });
+  const mediaProbe = mediaSessionMode
+    ? createMediaSessionProbe({ send, onAction: () => presentation.refresh() }) : null;
+  // Some embedded browsers surface hardware media keys as key events instead of media session
+  // actions, so echo the last key code too; without it "no action" is ambiguous.
+  let lastKeyCode = '';
+  if (mediaSessionMode) document.addEventListener('keydown', event => {
+    lastKeyCode = event.code || event.key || 'unknown';
+    presentation.refresh();
+  }, { capture: true });
   $('secure-setup').addEventListener('toggle', async () => {
     if (!$('secure-setup').open) return;
     $('https-entry').removeAttribute('href');
@@ -1119,7 +1167,13 @@ if (typeof document !== 'undefined') {
     // Still-image throughput is encode-bound when enc stays below tx; ACK latency covers send, decode and return.
     const imageDetail = image?.format
       ? `img enc ${image.encodedFps ?? 0} fps · tx ${image.sentFps ?? 0} fps · ack ${Math.round(image.lastAckMs || 0)} ms` : '';
-    const detail = [serverRtcDiag, imageDetail].filter(Boolean).join('\n');
+    const detail = [serverRtcDiag, imageDetail, mediaSessionMode
+      // The probe line is the evidence for whether the head unit delivers wheel keys at all.
+      ? `ms=${mediaSessionMode} api=${mediaProbe?.available ? 1 : 0}` +
+        ` key=${lastKeyCode || 'none'}` +
+        (mediaProbe?.last ? ` last=${mediaProbe.last.action} ${Math.max(0, Math.round((Date.now() - mediaProbe.last.at) / 1000))}s ago` : ' last=none') +
+        (serverMedia?.echo ? ` ${serverMedia.echo}` : '')
+      : ''].filter(Boolean).join('\n');
     const hint = serverRtcHint === 'hevc-unsupported' ? ` · ${t('web_disable_hevc_to_use_webrtc_on_this_head_unit')}` : '';
     $('status').textContent = (value.state === 'recovering' ? t('web_video_recovering', transport) :
       value.visible ? value.interactive ? t('web_transport_touch_connected', transport, rtc?.recovering ? t('web_waiting_for_recovery') : '') :
@@ -1289,6 +1343,7 @@ if (typeof document !== 'undefined') {
         if (data.type === 'status') {
           serverRtcHint = data.rtcHint || '';
           serverRtcDiag = data.rtcDiag || '';
+          if (data.media) { serverMedia = data.media; mediaProbe?.apply(data.media); }
           performanceStats.source = data.performance?.source ?? null;
           performanceStats.transport = data.performance?.transport ?? null;
           performanceStats.image = data.performance?.image ?? null;
@@ -1363,8 +1418,8 @@ if (typeof document !== 'undefined') {
     };
     ws.onerror = () => {}; // onclose owns retry and visible error state.
   }
-  $('connect-form').addEventListener('submit', event => {
-    event.preventDefault();
+  /** Start display; `?auto=1` runs the same path without a click. */
+  function launch() {
     launchMode = selectedMode;
     const generation = ++authGeneration;
     prepareLaunchPresentation();
@@ -1396,7 +1451,8 @@ if (typeof document !== 'undefined') {
         $('message').textContent = t("web_check_the_service_and_network_or_scan_again_enter");
       }
     })();
-  });
+  }
+  $('connect-form').addEventListener('submit', event => { event.preventDefault(); launch(); });
   $('phone-connect').addEventListener('click', () => {
     if (!paired || !send({ type: 'phone-connect' })) {
       $('phone-connect-message').textContent = t("web_browser_connection_interrupted_pair_again_and_retry");

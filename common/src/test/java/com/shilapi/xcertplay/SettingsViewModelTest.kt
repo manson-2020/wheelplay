@@ -73,6 +73,15 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun bluetoothAudioPriorityDefaultsOffAndAsksForAReconnect() {
+        val model = SettingsViewModel(app, SavedStateHandle())
+        assertFalse(model.state.value.checked(ToggleSetting.BLUETOOTH_AUDIO))
+        assertTrue(model.toggle(ToggleSetting.BLUETOOTH_AUDIO, true) is SettingsEffect.Reconnect)
+        assertTrue(AirPlayPersistence.loadBluetoothAudioPriority(app))
+        assertTrue(model.state.value.checked(ToggleSetting.BLUETOOTH_AUDIO))
+    }
+
+    @Test
     fun keepScreenOnDefaultsToEnabledAndPersistsToggleChanges() {
         val model = SettingsViewModel(app, SavedStateHandle())
         assertTrue(model.state.value.checked(ToggleSetting.KEEP_SCREEN_ON))
