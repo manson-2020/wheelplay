@@ -89,7 +89,7 @@
     <string name="settings_right_hand">Right-hand drive layout</string>
     <string name="settings_right_hand_description">Move CarPlay controls to the right.</string>
     <string name="settings_phone_status_badge">Phone battery and network badge</string>
-    <string name="settings_phone_status_badge_description">Show a circular gauge over the head-unit picture with the battery, media volume and the Wi-Fi or cellular signal of this phone. Drag it anywhere; double-tap returns it to the corner. The CarPlay status bar only ever reports the iPhone.</string>
+    <string name="settings_phone_status_badge_description">Show a circular gauge over the CarPlay picture - on the head unit and in the on-phone preview - with the battery, media volume and the Wi-Fi or cellular signal of this phone. Drag it anywhere; double-tap returns it to the corner. The CarPlay status bar only ever reports the iPhone.</string>
     <string name="settings_safe_area_preview">Display safe area preview</string>
     <string name="settings_safe_area_hint" formatted="false">The highlighted region is the CarPlay layout area. Each margin accepts 0–40%; 0 means no margin.</string>
     <string name="settings_margin_top">Top margin</string>

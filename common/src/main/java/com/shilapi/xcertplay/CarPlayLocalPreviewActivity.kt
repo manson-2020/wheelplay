@@ -101,6 +101,17 @@ class CarPlayLocalPreviewActivity : ComponentActivity() {
             addView(view, FrameLayout.LayoutParams(-1, -1))
         }
         loadingOverlay = buildLoadingOverlay().also { container.addView(it, FrameLayout.LayoutParams(-1, -1)) }
+        // The browser floats this gauge over the head-unit picture; this screen has no HTML behind the
+        // TextureView, so it draws the same one itself. Added last, so the loading veil never hides it.
+        if (AirPlayPersistence.loadPhoneStatusBadge(this)) {
+            container.addView(
+                PhoneStatusGaugeView(this),
+                FrameLayout.LayoutParams(dp(72), dp(72), Gravity.TOP or Gravity.RIGHT).apply {
+                    topMargin = dp(16)
+                    rightMargin = dp(16)
+                },
+            )
+        }
         setContentView(container)
         // Fill the whole panel (reclaim the top/left safe area). The aspect-preserving fit plus the
         // content-rect touch mapping keep every control aligned even where it meets the screen edge.

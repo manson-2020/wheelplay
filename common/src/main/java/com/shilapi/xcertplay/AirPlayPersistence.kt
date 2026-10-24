@@ -66,6 +66,8 @@ object AirPlayPersistence {
     private const val KEY_MAX_DETECTED_HEIGHT = "display_max_detected_height"
     private const val KEY_RIGHT_HAND_DRIVE = "right_hand_drive"
     private const val KEY_PHONE_STATUS_BADGE = "phone_status_badge"
+    private const val KEY_PHONE_STATUS_BADGE_X = "phone_status_badge_x"
+    private const val KEY_PHONE_STATUS_BADGE_Y = "phone_status_badge_y"
     private const val KEY_HIDE_TOP_BAR = "hide_top_bar"
     private const val KEY_HIDE_BOTTOM_BAR = "hide_bottom_bar"
     private const val KEY_ADAPTIVE_BROWSER_SIZE = "adaptive_browser_size"
@@ -601,6 +603,24 @@ object AirPlayPersistence {
     fun savePhoneStatusBadge(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_PHONE_STATUS_BADGE, enabled)
+            .apply()
+    }
+
+    /**
+     * Where the driver dragged the on-phone badge, in px from its laid-out corner; null until it has
+     * been moved. The browser keeps the same preference in localStorage, which does not exist here.
+     */
+    fun loadPhoneStatusBadgeOffset(context: Context): Pair<Float, Float>? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_PHONE_STATUS_BADGE_X)) return null
+        return prefs.getFloat(KEY_PHONE_STATUS_BADGE_X, 0f) to
+            prefs.getFloat(KEY_PHONE_STATUS_BADGE_Y, 0f)
+    }
+
+    fun savePhoneStatusBadgeOffset(context: Context, x: Float, y: Float) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putFloat(KEY_PHONE_STATUS_BADGE_X, x)
+            .putFloat(KEY_PHONE_STATUS_BADGE_Y, y)
             .apply()
     }
 
