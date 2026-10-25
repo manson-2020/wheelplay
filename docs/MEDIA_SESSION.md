@@ -119,5 +119,15 @@ On 2026-10-08, a V2547A device (API 37) was detected. The attempted Debug APK in
 | Browser takeover/disconnection | Unverified | Controls remain available; remote/local types follow actual output |
 | Another player taking focus | Unverified | iPhone and local music pause; resuming requires user action |
 | A2DP audio output | Unverified | Local PCM follows the system route without new pairing behavior |
-| AVRCP buttons/metadata/artwork | Unverified | Record compatibility by receiver model and implementation |
+| AVRCP buttons/metadata/artwork | Metadata verified on a Bluetooth receiver; artwork blocked below AVRCP 1.6 | Record compatibility by receiver model and implementation |
 | Seek and stale audio after seeking | Implemented; automated protocol/browser tests pass; device testing pending | Drag while playing and paused; phone reports the target; no stale audio; live/non-seekable items disable scrubbing |
+
+On 2026-10-25 a head unit playing this phone over Bluetooth showed the title and artist but no cover. The
+session publishes the cover (`METADATA_KEY_ALBUM_ART` and `METADATA_KEY_DISPLAY_ICON`), and Android's
+AVRCP target converts it to a 200x200 JPEG itself, so nothing in this app is missing. Cover art is gated
+in the phone's Bluetooth stack: `AvrcpTargetService` starts its `AvrcpCoverArtService` only when
+`persist.bluetooth.avrcpversion` resolves to `avrcp16`, and that property is empty on the tested device
+(NCO-AL00, Android 12 / API 31), which leaves the version invalid and skips the service - it logs "Please
+use AVRCP version 1.6 to enable cover art". AVRCP metadata does not need that service, which is why text
+arrives alone. Changing it needs the receiver's developer options (Bluetooth AVRCP version) or a rooted
+`setprop`; no application-level call can enable it.

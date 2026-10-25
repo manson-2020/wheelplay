@@ -38,7 +38,7 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
     private val density = resources.displayMetrics.density
-    // The browser draws its SVG inside an 88 px disc with a 1 px border and 2 px padding, so the
+    // The browser draws its SVG inside a 56 px disc with a 1 px border and 2 px padding, so the
     // viewBox never touches the disc edge. Both insets stay fixed in px/dp while the disc scales.
     private val discInset = (DISC_EDGE_DP + DISC_PADDING_DP) * density
 
