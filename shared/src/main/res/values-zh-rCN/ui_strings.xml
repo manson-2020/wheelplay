@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- UI copy adapted from DiAuto / DiPlay. See docs/THIRD_PARTY_NOTICES.md. -->
 <resources>
+    <string name="aa_microphone_permission_denied">录音权限已拒绝。Android Auto 将在没有麦克风输入的情况下连接。</string>
     <string name="ui_disconnect_the_iphone_before_importing_authentication_resources">请先断开 iPhone，再导入认证资源</string>
     <string name="ui_authentication_resources_imported_and_verified_you_can_now_connect">认证资源已导入并通过校验，现在可以连接 iPhone</string>
     <string name="ui_import_failed_use_a_diplay_apk_containing_identity_pk8">导入失败：请使用包含 identity.pk8 和 certificate.p7b 的 DiPlay APK（不超过 256 MB）。原有资源已保留。</string>

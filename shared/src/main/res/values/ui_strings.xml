@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- UI copy adapted from DiAuto / DiPlay. See docs/THIRD_PARTY_NOTICES.md. -->
 <resources>
+    <string name="aa_microphone_permission_denied">Microphone permission was denied. Android Auto will connect without microphone input.</string>
     <string name="ui_disconnect_the_iphone_before_importing_authentication_resources">Disconnect the iPhone before importing authentication resources</string>
     <string name="ui_authentication_resources_imported_and_verified_you_can_now_connect">Authentication resources imported and verified. You can now connect the iPhone</string>
     <string name="ui_import_failed_use_a_diplay_apk_containing_identity_pk8">Import failed. Use a DiPlay APK containing identity.pk8 and certificate.p7b (up to 256 MB). Existing resources were kept.</string>
