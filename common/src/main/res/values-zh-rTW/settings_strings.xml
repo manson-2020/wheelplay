@@ -61,7 +61,7 @@
     <string name="settings_microphone">麥克風來源</string>
     <string name="settings_microphone_description">修改後重新連線。瀏覽器麥克風需要可信 HTTPS 和授權，未就緒時回退 Android；禁用會停止上傳並取消麥克風能力宣告。</string>
     <string name="settings_appearance">CarPlay 晝夜模式</string>
-    <string name="settings_appearance_description">即時傳送給 iPhone；跟隨 Android 時使用此服務裝置的系統晝夜模式。</string>
+    <string name="settings_appearance_description">即時傳送給 iPhone；跟隨顯示裝置時，在 App 內顯示畫面使用本機系統晝夜模式，在瀏覽器顯示畫面則跟隨車機瀏覽器的深淺偏好（瀏覽器不上報時回落到系統值）。</string>
     <string name="settings_default_view">CarPlay 預設顯示位置</string>
     <string name="settings_default_view_description">選擇 iPhone 連線後 CarPlay 的去向。選擇「手機」會自動開啟 App 內顯示；選擇「瀏覽器」則串流至車機。</string>
     <string name="settings_display_size">CarPlay 圖示與文字大小</string>

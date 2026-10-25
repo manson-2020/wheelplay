@@ -22,6 +22,15 @@ function fixture() {
 }
 const touch = (x, down = true) => ({ type: 'touch', contacts: [{ id: 0, x, y: 0.5, down }] });
 
+test('the browser appearance report is queued instead of dropped by the control whitelist', () => {
+  const f = fixture();
+  // The outbox rejects unknown types, so "follow browser" silently never reaches the phone unless
+  // this message is whitelisted here as well as in the server's dispatch.
+  assert.equal(f.outbox.send({ type: 'browser-appearance', dark: true }), true);
+  f.socket.bufferedAmount = 0; f.advance(10);
+  assert.deepEqual(f.sent, [{ type: 'browser-appearance', dark: true }]);
+});
+
 test('GPS coalesces under backpressure and disabling clears queued coordinates', () => {
   const f = fixture();
   f.outbox.send({ type: 'location-start' });

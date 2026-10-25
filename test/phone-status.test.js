@@ -20,7 +20,8 @@ const markSlots = markup => [...groupMarkup(markup, 'mark')
 const markNetwork = markup => markup.match(/class="mark" data-network="([^"]+)"/)?.[1];
 const numberFill = markup => markup.match(/class="battery-number"[^>]*fill="(#[0-9a-f]{6})"/)?.[1];
 const numberText = markup => markup.match(/class="battery-number"[^>]*>([^<]*)</)?.[1];
-const markLabel = markup => markup.match(/class="mark-label"[^>]*>([^<]*)</)?.[1];
+const volumeText = markup => markup.match(/class="volume-number"[^>]*>([^<]*)</)?.[1];
+const ringPath = (markup, name) => markup.match(new RegExp(`class="${name}-level" d="([^"]+)"`))?.[1];
 const gauge = phone => phoneStatusBadge(phone);
 
 test('the gauge stays hidden until the server reports the phone', () => {
@@ -37,18 +38,36 @@ test('the battery number copies the colour of the battery arc exactly', () => {
   assert.equal(ringStrokes(gauge({ network: 'wifi', bars: 3, battery: 14, volume: 64 }))[1], low);
 });
 
-test('charging is told by the colour alone and never draws a bolt', () => {
+test('the battery keeps the ink when healthy, turns red under the threshold, green while charging', () => {
+  const arc = markup => ringStrokes(markup)[1];
+  // Healthy and off the charger: the same ink the volume ring uses, so the battery is not "special".
+  assert.equal(arc(gauge({ network: 'wifi', bars: 2, battery: 21, volume: 40 })), ink);
+  // The threshold itself is still healthy; only below it does the warning take over.
+  assert.equal(arc(gauge({ network: 'wifi', bars: 2, battery: 20, volume: 40 })), ink);
+  assert.equal(arc(gauge({ network: 'wifi', bars: 2, battery: 19, volume: 40 })), low);
+  // Green only while the phone charges, at both ends of the scale.
+  assert.equal(arc(gauge({ network: 'wifi', bars: 2, battery: 15, volume: 40, charging: true })), charging);
+  assert.equal(arc(gauge({ network: 'wifi', bars: 2, battery: 88, volume: 40, charging: true })), charging);
+  assert.equal(numberFill(gauge({ network: 'wifi', bars: 2, battery: 88, volume: 40, charging: true })), charging);
+  // Charging is told by the colour alone: no bolt, and the number stays in the top opening.
   const markup = gauge({ network: 'wifi', bars: 2, battery: 15, volume: 40, charging: true });
-  assert.equal(ringStrokes(markup)[1], low);
-  assert.equal(numberFill(markup), low);
   assert.doesNotMatch(markup, /battery-charging/);
-  // The number always keeps the middle of the opening at the top.
-  assert.match(gauge({ network: 'wifi', bars: 2, battery: 63, volume: 40, charging: true }),
-    /class="battery-number" x="50"/);
+  assert.match(markup, /class="battery-number" x="50"/);
+});
+
+test('read clockwise: battery down the right from the top, volume up the left from the bottom', () => {
+  const markup = gauge({ network: 'wifi', bars: 3, battery: 62, volume: 40 });
+  // Both arcs start at the opening their own number sits in, so progress grows clockwise.
+  assert.equal(ringPath(markup, 'battery'), 'M69.3 10.5A44 44 0 0 1 69.3 89.5');
+  assert.equal(ringPath(markup, 'volume'), 'M30.7 89.5A44 44 0 0 1 30.7 10.5');
+  // The volume number takes the bottom opening the transport word used to fill.
+  assert.equal(volumeText(markup), '40');
+  assert.doesNotMatch(markup, /mark-label/);
 });
 
 test('each ring carries its own progress as a dash offset over a fixed track', () => {
   const markup = gauge({ network: 'wifi', bars: 4, battery: 88, volume: 64 });
+  // Off the charger both rings are the same ink.
   assert.deepEqual(ringStrokes(markup), [track, ink, track, ink]);
   assert.deepEqual(ringOffsets(markup), { battery: 12, volume: 36 });
   // Full and empty are the two ends the driver checks first, and both keep their track visible.
@@ -84,21 +103,21 @@ test('the Wi-Fi fan is the signal meter: its arcs light from the inside out', ()
   assert.equal(markNetwork(dead), 'wifi');
 });
 
-test('cellular lights its bars from the left and names itself below', () => {
+test('cellular lights its bars from the left', () => {
   const markup = gauge({ network: '5g', bars: 2, battery: 63, volume: 64 });
   assert.equal(markNetwork(markup), '5g');
   assert.deepEqual(markSlots(markup).map(slot => slot.color), [ink, ink, track, track]);
-  assert.equal(markLabel(markup), '5G');
   assert.doesNotMatch(markup, /<path d="M43\.2/);
 });
 
-test('every transport fills the bottom opening with a word', () => {
-  assert.equal(markLabel(gauge({ network: 'wifi', bars: 3, battery: 88, volume: 64 })), 'WIFI');
-  assert.equal(markLabel(gauge({ network: 'cellular', bars: 1, battery: 40, volume: 64 })), 'NET');
-  assert.equal(markLabel(gauge({ network: 'eth', bars: 4, battery: 40, volume: 64 })), 'LAN');
-  // No connection at all: the bars stay grey and the word says so, instead of an empty notch.
+test('the transport stays in the icon: every network keeps the bottom opening for the volume', () => {
+  for (const network of ['wifi', 'cellular', 'eth', 'none']) {
+    const markup = gauge({ network, bars: 1, battery: 40, volume: 7 });
+    assert.equal(volumeText(markup), '7', network);
+  }
+  // No connection at all: the bars stay grey, but the reading still shows.
   const dead = gauge({ network: 'none', bars: 0, battery: 40, volume: 64 });
-  assert.equal(markLabel(dead), 'OFF');
+  assert.equal(volumeText(dead), '64');
   assert.deepEqual(markSlots(dead).map(slot => slot.color), [track, track, track, track]);
 });
 
@@ -119,7 +138,7 @@ test('out-of-range and hostile input cannot reach the markup', () => {
   // An unrecognised transport falls back to "none" rather than reaching the markup as written.
   const hostile = gauge({ network: '<img src=x>', bars: 2, battery: 40, volume: 10 });
   assert.doesNotMatch(hostile, /<img|src=x/);
-  assert.equal(markLabel(hostile), 'OFF');
+  assert.equal(markNetwork(hostile), 'none');
   assert.equal(numberText(hostile), '40');
 });
 

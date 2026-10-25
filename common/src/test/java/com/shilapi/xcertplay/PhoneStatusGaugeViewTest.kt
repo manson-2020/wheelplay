@@ -6,14 +6,18 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.view.View
 import com.shilapi.xcertplay.web.PhoneStatus
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.sin
 
 /**
  * Draws the on-phone gauge off-screen, so the geometry is checked as pixels: which side of the ring
@@ -34,9 +38,15 @@ class PhoneStatusGaugeViewTest {
             return (size - 2f * 3f * density) / 100f * PhoneGaugeGeometry.RING_RADIUS
         }
 
-    private fun render(battery: Int, volume: Int, network: String = "wifi", bars: Int = 4): Bitmap {
+    private fun render(
+        battery: Int,
+        volume: Int,
+        network: String = "wifi",
+        bars: Int = 4,
+        charging: Boolean = false,
+    ): Bitmap {
         val view = PhoneStatusGaugeView(RuntimeEnvironment.getApplication())
-        view.apply(PhoneStatus.Snapshot(battery, false, volume, network, bars), animate = false)
+        view.apply(PhoneStatus.Snapshot(battery, charging, volume, network, bars), animate = false)
         view.measure(
             View.MeasureSpec.makeMeasureSpec(size, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(size, View.MeasureSpec.EXACTLY),
@@ -58,26 +68,55 @@ class PhoneStatusGaugeViewTest {
         return best
     }
 
-    private fun leftArc(bitmap: Bitmap) = brightest(bitmap, center - radius, center.toFloat(), 6)
-    private fun rightArc(bitmap: Bitmap) = brightest(bitmap, center + radius, center.toFloat(), 6)
+    /** The pixel on the ring at [degrees] in Canvas angles (0 = 3 o'clock). */
+    private fun ringColor(bitmap: Bitmap, degrees: Float): Int {
+        val radians = Math.toRadians(degrees.toDouble())
+        return bitmap.getPixel(
+            (center + radius * cos(radians)).toInt(),
+            (center + radius * sin(radians)).toInt(),
+        )
+    }
+
+    /** The left arc now carries the volume, the right one the battery - read clockwise from the top. */
+    private fun volumeArc(bitmap: Bitmap) = brightest(bitmap, center - radius, center.toFloat(), 6)
+    private fun batteryArc(bitmap: Bitmap) = brightest(bitmap, center + radius, center.toFloat(), 6)
 
     @Test
     fun aZeroReadingKeepsBothArcMidpointsOnTheGreyTrack() {
         val bitmap = render(0, 0)
-        val left = leftArc(bitmap)
-        val right = rightArc(bitmap)
+        val left = volumeArc(bitmap)
+        val right = batteryArc(bitmap)
         // Ink is what a sliver of progress looks like; the track must survive so the ring reads as empty.
-        assertTrue("an empty battery arc must not show ink, found $left", left < 190)
-        assertTrue("an empty volume arc must not show ink, found $right", right < 190)
-        assertTrue("an empty ring must still draw its track, found $left", left > 60)
+        assertTrue("an empty battery arc must not show ink, found $right", right < 190)
+        assertTrue("an empty volume arc must not show ink, found $left", left < 190)
         assertTrue("an empty ring must still draw its track, found $right", right > 60)
+        assertTrue("an empty ring must still draw its track, found $left", left > 60)
     }
 
     @Test
     fun aFullReadingPaintsInkAcrossBothArcs() {
         val bitmap = render(100, 100)
-        assertTrue("a full battery arc must be ink, found ${leftArc(bitmap)}", leftArc(bitmap) > 200)
-        assertTrue("a full volume arc must be ink, found ${rightArc(bitmap)}", rightArc(bitmap) > 200)
+        assertTrue("a full battery arc must be ink, found ${batteryArc(bitmap)}", batteryArc(bitmap) > 200)
+        assertTrue("a full volume arc must be ink, found ${volumeArc(bitmap)}", volumeArc(bitmap) > 200)
+    }
+
+    @Test
+    fun theBatteryArcIsInkWhenHealthyRedWhenLowAndGreenWhileCharging() {
+        // A few degrees past the battery arc's start, which every reading paints.
+        val degrees = PhoneGaugeGeometry.BATTERY_START_DEGREES + 8
+        val healthy = ringColor(render(88, 64), degrees)
+        val low = ringColor(render(10, 64), degrees)
+        val charging = ringColor(render(10, 64, charging = true), degrees)
+        // Healthy keeps the neutral ink the volume ring uses: bright, but with no hue of its own.
+        assertTrue(
+            "a healthy reading must stay neutral ink, found $healthy",
+            Color.green(healthy) - Color.red(healthy) < 20 && Color.green(healthy) > 180,
+        )
+        assertTrue("a low reading must be red, found $low", Color.red(low) > Color.green(low) + 100)
+        assertTrue(
+            "a phone on the charger must be green, found $charging",
+            Color.green(charging) > Color.red(charging) + 60,
+        )
     }
 
     @Test
@@ -100,6 +139,21 @@ class PhoneStatusGaugeViewTest {
             best = max(best, brightest(bitmap, center.toFloat(), y.toFloat(), 20))
         }
         assertTrue("the reading must be drawn between the arc caps, found $best", best > 200)
+    }
+
+    @Test
+    fun aPlugGoingInRepaintsEvenWhenNeitherArcMoves() {
+        val view = PhoneStatusGaugeView(RuntimeEnvironment.getApplication())
+        view.apply(PhoneStatus.Snapshot(64, false, 40, "wifi", 3), animate = false)
+        val shadow = shadowOf(view)
+        shadow.clearWasInvalidated()
+        // Same numbers, the cable goes in: only the colour changes, and it still has to reach the glass.
+        view.apply(PhoneStatus.Snapshot(64, true, 40, "wifi", 3), animate = false)
+        assertTrue("the new battery colour must repaint the gauge", shadow.wasInvalidated())
+        shadow.clearWasInvalidated()
+        // A reading that repeats itself is not worth a frame.
+        view.apply(PhoneStatus.Snapshot(64, true, 40, "wifi", 3), animate = false)
+        assertFalse("an unchanged reading must not repaint", shadow.wasInvalidated())
     }
 
     @Test

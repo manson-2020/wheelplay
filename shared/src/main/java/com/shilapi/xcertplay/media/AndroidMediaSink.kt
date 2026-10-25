@@ -183,6 +183,10 @@ class AndroidMediaSink(
         return if (w > 0 && h > 0) w to h else null
     }
 
+    /** True while any screen carries video, whichever consumer (browser or phone) holds it. */
+    val hasActiveScreenStreams: Boolean
+        get() = synchronized(screenStateLock) { activeScreenTypes.isNotEmpty() }
+
     fun setScreenStreamActiveChangedListener(listener: ((Int, Boolean) -> Unit)?) {
         synchronized(screenStateLock) {
             screenStreamActiveChanged = listener

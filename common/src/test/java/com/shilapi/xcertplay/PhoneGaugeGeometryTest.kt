@@ -39,22 +39,14 @@ class PhoneGaugeGeometryTest {
     @Test
     fun theTwoOpeningsLeaveOneHundredAndTwentyEightDegrees() {
         assertEquals(128f, PhoneGaugeGeometry.ARC_DEGREES, 0.001f)
-        // Canvas starts at 3 o'clock, so the volume arc begins a quarter turn before the SVG.
-        assertEquals(-64f, PhoneGaugeGeometry.VOLUME_START_DEGREES, 0.001f)
-        assertEquals(-116f, PhoneGaugeGeometry.BATTERY_START_DEGREES, 0.001f)
-    }
-
-    @Test
-    fun everyTransportFillsTheBottomOpeningWithItsBrowserWord() {
-        assertEquals("WIFI", PhoneGaugeGeometry.label("wifi"))
-        assertEquals("5G", PhoneGaugeGeometry.label("5g"))
-        assertEquals("4G", PhoneGaugeGeometry.label("4g"))
-        assertEquals("3G", PhoneGaugeGeometry.label("3g"))
-        assertEquals("2G", PhoneGaugeGeometry.label("2g"))
-        assertEquals("NET", PhoneGaugeGeometry.label("cellular"))
-        assertEquals("LAN", PhoneGaugeGeometry.label("eth"))
-        assertEquals("OFF", PhoneGaugeGeometry.label("none"))
-        assertEquals("OFF", PhoneGaugeGeometry.label("bogus"))
+        // Canvas starts at 3 o'clock, so the SVG's top opening sits 26 degrees past 12 and the bottom
+        // one 26 degrees past 6. Both arcs then sweep clockwise from their own opening.
+        assertEquals(-64f, PhoneGaugeGeometry.BATTERY_START_DEGREES, 0.001f)
+        assertEquals(116f, PhoneGaugeGeometry.VOLUME_START_DEGREES, 0.001f)
+        // Read clockwise: the battery arc ends on the right below its number, the volume arc on the
+        // left above its own.
+        assertEquals(64f, PhoneGaugeGeometry.BATTERY_START_DEGREES + PhoneGaugeGeometry.ARC_DEGREES, 0.001f)
+        assertEquals(244f, PhoneGaugeGeometry.VOLUME_START_DEGREES + PhoneGaugeGeometry.ARC_DEGREES, 0.001f)
     }
 
     @Test

@@ -2993,7 +2993,10 @@ class CarPlayHostActivity : ComponentActivity() {
             setLocalizedConnectionStage(UiText(UiR.string.ui_authentication_resources_are_not_ready_import_files_or_a))
             return
         }
-        if (!CarPlayBackgroundSession.reserve(this, { WebSession.stageDetail(this) }) { completion ->
+        if (!CarPlayBackgroundSession.reserve(this, {
+                if (CarPlayBackgroundSession.isStreaming()) getString(UiR.string.ui_carplay_connected)
+                else WebSession.stageDetail(this)
+            }) { completion ->
                 runOnUiThread { shutdown(false, "WheelPlay disconnect", completion); finish() }
             }) {
             showDiPlayHome("home")
@@ -3703,6 +3706,9 @@ internal object CarPlayBackgroundSession {
         val currentSink = sink ?: return null
         return Snapshot(currentController, currentSink, width, height)
     }
+
+    /** True once the iPhone picture itself is flowing, so the dashboard can stop saying "waiting". */
+    @Synchronized fun isStreaming(): Boolean = sink?.hasActiveScreenStreams == true
 
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<(Snapshot?) -> Unit>()
     fun subscribe(listener: (Snapshot?) -> Unit): AutoCloseable {

@@ -54,6 +54,16 @@ internal object PhoneStatus {
         }
     }
 
+    /**
+     * The same reading with the cache dropped first: a cable going in or out, or a gauge coming back on
+     * screen, must show the plug state of this second rather than the one that was cached up to
+     * [CACHE_MILLIS] ago.
+     */
+    fun refresh(context: Context): Snapshot {
+        cached = null
+        return snapshot(context)
+    }
+
     /** The sticky battery broadcast: no receiver registration and no permission required. */
     private fun batteryLevel(context: Context): Pair<Int, Boolean> {
         val intent = runCatching {

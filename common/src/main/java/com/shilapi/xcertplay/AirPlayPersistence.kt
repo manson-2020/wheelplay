@@ -128,9 +128,15 @@ object AirPlayPersistence {
             .putBoolean(KEY_BROWSER_MICROPHONE, source == CarPlayMicrophoneSource.BROWSER).apply()
     }
 
-    fun loadAppearance(context: Context): CarPlayAppearance = CarPlayAppearance.entries.firstOrNull {
-        it.name == context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_APPEARANCE, null)
-    } ?: CarPlayAppearance.SYSTEM
+    fun loadAppearance(context: Context): CarPlayAppearance {
+        val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_APPEARANCE, null)
+        // "SYSTEM" and "BROWSER" were separate choices before they were merged into following the
+        // displaying device; both legacy names resolve to the merged choice.
+        val name = if (stored == "SYSTEM" || stored == "BROWSER") "FOLLOW_DISPLAY" else stored
+        return CarPlayAppearance.entries.firstOrNull { it.name == name }
+            ?: CarPlayAppearance.FOLLOW_DISPLAY
+    }
     fun saveAppearance(context: Context, value: CarPlayAppearance) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_APPEARANCE, value.name).apply()
     }

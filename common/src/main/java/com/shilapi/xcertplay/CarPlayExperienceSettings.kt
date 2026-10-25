@@ -10,13 +10,20 @@ import com.shilapi.xcertplay.shared.R as UiR
 import kotlin.math.roundToInt
 
 enum class CarPlayAppearance(@param:androidx.annotation.StringRes val labelRes: Int) {
-    SYSTEM(UiR.string.ui_follow_android),
+    /**
+     * Follows whichever device is showing the picture right now: the Android system theme while
+     * CarPlay is displayed on this device, the head-unit browser's own light/dark preference while
+     * it is streamed to the browser. [night] falls back to the Android value until a browser has
+     * reported one, so a head unit that never sends the media query result behaves exactly like a
+     * plain follow-Android choice instead of locking CarPlay to one appearance.
+     */
+    FOLLOW_DISPLAY(UiR.string.ui_follow_display),
     DAY(UiR.string.ui_always_day),
     NIGHT(UiR.string.ui_always_night);
 
-    fun night(systemNight: Boolean): Boolean =
+    fun night(systemNight: Boolean, browserNight: Boolean?, localDisplay: Boolean): Boolean =
         when (this) {
-            SYSTEM -> systemNight
+            FOLLOW_DISPLAY -> if (localDisplay) systemNight else browserNight ?: systemNight
             DAY -> false
             NIGHT -> true
         }

@@ -6,7 +6,7 @@
     <string name="ui_authentication_resources_imported_and_verified_you_can_now_connect">Authentication resources imported and verified. You can now connect the iPhone</string>
     <string name="ui_import_failed_use_a_diplay_apk_containing_identity_pk8">Import failed. Use a DiPlay APK containing identity.pk8 and certificate.p7b (up to 256 MB). Existing resources were kept.</string>
     <string name="ui_import_failed_choose_a_valid_matching_pkcs_8_private">Import failed. Choose a valid, matching PKCS#8 private key and P-256 certificate (up to 16 KB each). Existing resources were kept.</string>
-    <string name="ui_follow_android">Follow Android</string>
+    <string name="ui_follow_display">Follow display device</string>
     <string name="ui_always_day">Always day</string>
     <string name="ui_always_night">Always night</string>
     <string name="ui_android_microphone">Android microphone</string>

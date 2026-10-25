@@ -61,7 +61,7 @@
     <string name="settings_microphone">麦克风来源</string>
     <string name="settings_microphone_description">修改后重新连接。浏览器麦克风需要可信 HTTPS 和授权，未就绪时回退 Android；禁用会停止上传并取消麦克风能力声明。</string>
     <string name="settings_appearance">CarPlay 昼夜模式</string>
-    <string name="settings_appearance_description">即时发送给 iPhone；跟随 Android 时使用此服务设备的系统昼夜模式。</string>
+    <string name="settings_appearance_description">即时发送给 iPhone；跟随显示设备时，在 App 内显示画面使用本机系统昼夜模式，在浏览器显示画面则跟随车机浏览器的深浅偏好（浏览器不上报时回落到系统值）。</string>
     <string name="settings_default_view">CarPlay 默认显示位置</string>
     <string name="settings_default_view_description">选择 iPhone 连接后 CarPlay 的去向。选择“手机”会自动打开 App 内显示；选择“浏览器”则串流到车机。</string>
     <string name="settings_display_size">CarPlay 图标与文字大小</string>

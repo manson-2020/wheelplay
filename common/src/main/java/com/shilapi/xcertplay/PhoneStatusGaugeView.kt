@@ -2,7 +2,10 @@
 package com.shilapi.xcertplay
 
 import android.animation.ValueAnimator
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -14,6 +17,7 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.PathInterpolator
+import androidx.core.content.ContextCompat
 import com.shilapi.xcertplay.web.PhoneStatus
 import kotlin.math.hypot
 import kotlin.math.max
@@ -56,10 +60,6 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
-    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.CENTER
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-    }
     private val box = RectF()
 
     private var values: PhoneStatus.Snapshot? = null
@@ -73,6 +73,14 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         override fun run() {
             apply(PhoneStatus.snapshot(context))
             handler.postDelayed(this, POLL_MILLIS)
+        }
+    }
+
+    // A cable in or out moves no arc - it only changes the battery colour - and the reading itself is
+    // cached, so the plug events repaint from a fresh snapshot instead of waiting the cache out.
+    private val power = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            apply(PhoneStatus.refresh(context))
         }
     }
 
@@ -99,12 +107,20 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        handler.post(poll)
+        val plugs = IntentFilter().apply {
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
+        }
+        ContextCompat.registerReceiver(context, power, plugs, ContextCompat.RECEIVER_NOT_EXPORTED)
+        // Paint the reading of this moment instead of the one left in the cache by whoever saw it last.
+        apply(PhoneStatus.refresh(context), animate = false)
+        handler.postDelayed(poll, POLL_MILLIS)
         post { restorePosition() }
     }
 
     override fun onDetachedFromWindow() {
         handler.removeCallbacks(poll)
+        runCatching { context.unregisterReceiver(power) }
         sweep?.cancel()
         sweep = null
         super.onDetachedFromWindow()
@@ -183,6 +199,7 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
 
     /** The phone's own reading, or null when nothing is readable and the gauge must stay away. */
     internal fun apply(next: PhoneStatus.Snapshot?, animate: Boolean = true) {
+        val previous = values
         values = next
         if (next == null || !PhoneGaugeGeometry.showsGauge(next)) {
             sweep?.cancel()
@@ -191,14 +208,21 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
             return
         }
         visibility = VISIBLE
+        // Only the battery reading leaves the neutral ink: green while the phone charges, red under the
+        // threshold - charging outranks the warning.
         batteryColor = when {
-            next.battery in 0 until PhoneStatus.LOW_BATTERY_PERCENT -> LOW
             next.charging -> CHARGING
+            next.battery in 0 until PhoneStatus.LOW_BATTERY_PERCENT -> LOW
             else -> INK
         }
         val targetBattery = PhoneGaugeGeometry.dashOffset(next.battery)
         val targetVolume = PhoneGaugeGeometry.dashOffset(next.volume)
-        if (targetBattery == batteryOffset && targetVolume == volumeOffset) return
+        if (targetBattery == batteryOffset && targetVolume == volumeOffset) {
+            // Neither arc moves, but the numbers, the colour the plug state drives or the transport icon
+            // may still have changed: they live in the reading, and only a repaint puts them on glass.
+            if (previous != next) invalidate()
+            return
+        }
         if (!animate) {
             sweep?.cancel()
             sweep = null
@@ -241,12 +265,13 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
 
         box.set(cx - radius, cy - radius, cx + radius, cy + radius)
         val stroke = PhoneGaugeGeometry.RING_STROKE * unit
-        // Every ring sits in the same box, so both arcs keep their caps inside the two openings.
-        drawRing(canvas, TRACK, PhoneGaugeGeometry.BATTERY_START_DEGREES, -PhoneGaugeGeometry.ARC_DEGREES, stroke)
+        // Every ring sits in the same box, so both arcs keep their caps inside the two openings. Both
+        // grow clockwise from their own opening: the battery down the right, the volume up the left.
+        drawRing(canvas, TRACK, PhoneGaugeGeometry.BATTERY_START_DEGREES, PhoneGaugeGeometry.ARC_DEGREES, stroke)
         drawRing(canvas, TRACK, PhoneGaugeGeometry.VOLUME_START_DEGREES, PhoneGaugeGeometry.ARC_DEGREES, stroke)
         drawRing(
             canvas, batteryColor, PhoneGaugeGeometry.BATTERY_START_DEGREES,
-            -PhoneGaugeGeometry.sweepDegrees(batteryOffset), stroke,
+            PhoneGaugeGeometry.sweepDegrees(batteryOffset), stroke,
         )
         drawRing(
             canvas, INK, PhoneGaugeGeometry.VOLUME_START_DEGREES,
@@ -255,14 +280,14 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
 
         drawMark(canvas, snapshot, cx, cy, unit)
 
-        // The number keeps the middle of the top opening and the transport word the bottom one.
-        val number = if (snapshot.battery < 0) "" else snapshot.battery.toString()
+        // Read clockwise from the top: battery number, battery arc, volume number, volume arc.
+        val batteryText = if (snapshot.battery < 0) "" else snapshot.battery.toString()
+        val volumeText = if (snapshot.volume < 0) "" else snapshot.volume.toString()
         numberPaint.textSize = 15f * unit
         numberPaint.color = batteryColor
-        canvas.drawText(number, cx, cy + (20f - 50f) * unit, numberPaint)
-        labelPaint.textSize = 12f * unit
-        labelPaint.color = INK
-        canvas.drawText(PhoneGaugeGeometry.label(snapshot.network), cx, cy + (90.1f - 50f) * unit, labelPaint)
+        canvas.drawText(batteryText, cx, cy + (20f - 50f) * unit, numberPaint)
+        numberPaint.color = INK
+        canvas.drawText(volumeText, cx, cy + (90f - 50f) * unit, numberPaint)
     }
 
     private fun drawRing(canvas: Canvas, color: Int, start: Float, sweep: Float, stroke: Float) {
@@ -351,12 +376,14 @@ internal object PhoneGaugeGeometry {
     /** 180 degrees minus the two 26 degree openings. */
     const val ARC_DEGREES = 180f - 2f * 26f
     const val RING_RADIUS = 44f
-    const val RING_STROKE = 7.5f
+    const val RING_STROKE = 9f
     private const val STUB_PERCENT = 6f
     const val EMPTY_OFFSET = 107f
-    // Canvas angles start at 3 o'clock while the SVG starts at 12 o'clock, hence the quarter turn.
-    const val VOLUME_START_DEGREES = 26f - 90f
-    const val BATTERY_START_DEGREES = -26f - 90f
+    // Canvas angles start at 3 o'clock while the SVG starts at 12 o'clock, hence the quarter turn. Every
+    // arc then sweeps clockwise from the opening its own number sits in - the battery from the top one
+    // down the right, the volume from the bottom one up the left.
+    const val BATTERY_START_DEGREES = 26f - 90f
+    const val VOLUME_START_DEGREES = 180f + 26f - 90f
 
     /** A reading too small to see still leaves a stub, so it never reads as a missing stroke. */
     fun dashOffset(percent: Int?): Float =
@@ -365,18 +392,6 @@ internal object PhoneGaugeGeometry {
     /** Degrees of arc an offset covers; at or past 100 nothing is drawn. */
     fun sweepDegrees(offset: Float): Float =
         ((100f - offset) / 100f).coerceAtLeast(0f) * ARC_DEGREES
-
-    /** Every transport fills the bottom opening with a word, short enough for the gap. */
-    fun label(network: String): String = when (network) {
-        "wifi" -> "WIFI"
-        "5g" -> "5G"
-        "4g" -> "4G"
-        "3g" -> "3G"
-        "2g" -> "2G"
-        "cellular" -> "NET"
-        "eth" -> "LAN"
-        else -> "OFF"
-    }
 
     /** An empty circle must never float over the picture, the same rule the browser applies. */
     fun showsGauge(snapshot: PhoneStatus.Snapshot?): Boolean =

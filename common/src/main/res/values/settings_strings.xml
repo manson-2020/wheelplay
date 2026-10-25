@@ -61,7 +61,7 @@
     <string name="settings_microphone">Microphone source</string>
     <string name="settings_microphone_description">Reconnects after changes. The browser microphone requires trusted HTTPS and permission; Android is used until it is ready. Disabling stops uploads and removes the microphone capability.</string>
     <string name="settings_appearance">CarPlay day/night mode</string>
-    <string name="settings_appearance_description">Sent to the iPhone immediately. Follow Android uses this service device\'s system day/night mode.</string>
+    <string name="settings_appearance_description">Sent to the iPhone immediately. Follow display device uses this service device\'s system day/night mode while CarPlay is shown on the phone, and the head-unit browser\'s own light/dark preference while it is streamed to the browser.</string>
     <string name="settings_default_view">Show CarPlay on</string>
     <string name="settings_default_view_description">Choose where CarPlay goes after the iPhone connects. The phone option opens the in-app display automatically; the browser option streams to the head unit.</string>
     <string name="settings_display_size">CarPlay icon and text size</string>

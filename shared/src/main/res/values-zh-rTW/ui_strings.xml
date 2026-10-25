@@ -6,7 +6,7 @@
     <string name="ui_authentication_resources_imported_and_verified_you_can_now_connect">認證資源已匯入並透過校驗，現在可以連線 iPhone</string>
     <string name="ui_import_failed_use_a_diplay_apk_containing_identity_pk8">匯入失敗：請使用包含 identity.pk8 和 certificate.p7b 的 DiPlay APK（不超過 256 MB）。原有資源已保留。</string>
     <string name="ui_import_failed_choose_a_valid_matching_pkcs_8_private">匯入失敗：請選擇有效且匹配的 PKCS#8 私密金鑰和 P-256 憑證（各不超過 16 KB）。原有資源已保留。</string>
-    <string name="ui_follow_android">跟隨 Android</string>
+    <string name="ui_follow_display">跟隨顯示裝置</string>
     <string name="ui_always_day">始終日間</string>
     <string name="ui_always_night">始終夜間</string>
     <string name="ui_android_microphone">Android 麥克風</string>

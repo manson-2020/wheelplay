@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import android.content.Context
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.test.*
@@ -22,6 +23,58 @@ import org.robolectric.annotation.Config
 class CarPlayExperienceSettingsTest : ComposeSettingsTest() {
     private val context
         get() = RuntimeEnvironment.getApplication()
+
+    @Test
+    fun followDisplayUsesTheDisplayingDeviceAndFallsBackToAndroid() {
+        // Streamed to the browser: the head unit's own answer wins, in both directions.
+        assertTrue(
+            CarPlayAppearance.FOLLOW_DISPLAY.night(
+                systemNight = false, browserNight = true, localDisplay = false,
+            )
+        )
+        assertFalse(
+            CarPlayAppearance.FOLLOW_DISPLAY.night(
+                systemNight = true, browserNight = false, localDisplay = false,
+            )
+        )
+        // Shown on this device: the Android value wins even though the browser reported otherwise.
+        assertTrue(
+            CarPlayAppearance.FOLLOW_DISPLAY.night(
+                systemNight = true, browserNight = false, localDisplay = true,
+            )
+        )
+        assertFalse(
+            CarPlayAppearance.FOLLOW_DISPLAY.night(
+                systemNight = false, browserNight = true, localDisplay = true,
+            )
+        )
+        // No report yet: the browser path resolves to the Android value, so an unsupported head unit
+        // stays usable instead of locking CarPlay to one appearance.
+        for (systemNight in listOf(false, true)) {
+            assertEquals(
+                systemNight,
+                CarPlayAppearance.FOLLOW_DISPLAY.night(systemNight, browserNight = null, localDisplay = false),
+            )
+        }
+        // Forced choices ignore both devices.
+        assertFalse(
+            CarPlayAppearance.DAY.night(systemNight = true, browserNight = true, localDisplay = true)
+        )
+        assertTrue(
+            CarPlayAppearance.NIGHT.night(systemNight = false, browserNight = false, localDisplay = false)
+        )
+    }
+
+    @Test
+    fun legacyAppearanceNamesMigrateToFollowDisplay() {
+        val preferences = context.getSharedPreferences("xcertplay_airplay", Context.MODE_PRIVATE)
+        for (legacy in listOf("SYSTEM", "BROWSER")) {
+            preferences.edit().putString("carplay_appearance", legacy).commit()
+            assertEquals(CarPlayAppearance.FOLLOW_DISPLAY, AirPlayPersistence.loadAppearance(context))
+        }
+        preferences.edit().putString("carplay_appearance", "NIGHT").commit()
+        assertEquals(CarPlayAppearance.NIGHT, AirPlayPersistence.loadAppearance(context))
+    }
 
     private fun views(view: View): List<View> =
         listOf(view) +
@@ -68,7 +121,7 @@ class CarPlayExperienceSettingsTest : ComposeSettingsTest() {
 
     @Test
     fun defaultsPreserveExistingBehaviorAndLegacyBrowserMicrophoneMigrates() {
-        assertEquals(CarPlayAppearance.SYSTEM, AirPlayPersistence.loadAppearance(context))
+        assertEquals(CarPlayAppearance.FOLLOW_DISPLAY, AirPlayPersistence.loadAppearance(context))
         assertEquals(
             BrowserOfflinePolicy.KEEP,
             AirPlayPersistence.loadBrowserOfflinePolicy(context),

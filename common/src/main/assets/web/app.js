@@ -284,7 +284,7 @@ export function createControlOutbox(socket, {
         if (kind === 'move' && tail && tail.kind === 'move' && tail.type === data.type && tail.eventKind === data.kind) tail.json = json;
         else if (touches.length < 64) touches.push({ kind, json, type: data.type, eventKind: data.kind });
         else { fail(); return false; }
-      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'phone-connect', 'image-format', 'location-start', 'location-stop', 'location-clear', 'media', 'media-command'].includes(data.type)) {
+      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'phone-connect', 'image-format', 'location-start', 'location-stop', 'location-clear', 'media', 'media-command', 'browser-appearance'].includes(data.type)) {
         if (signals.length >= 8 || json.length > 32768) { fail(); return false; }
         if (data.type.startsWith('location-')) locationFix = null;
         signals.push(json);
@@ -293,6 +293,44 @@ export function createControlOutbox(socket, {
       return !closed;
     },
     close,
+  };
+}
+
+// The head unit's own light/dark preference is the only appearance signal a browser exposes.
+// "Follow browser" turns that media query into CarPlay's night mode, so the page reports it on
+// every (re)connect, whenever it flips, and whenever the page is shown again: a head unit normally
+// leaves the page to change its appearance, and not every embedded Chromium delivers the `change`
+// event for that. A browser without the media query reports nothing, leaving the phone on the
+// Android value instead of forcing one appearance.
+export function createAppearanceReporter({
+  send, query = () => window.matchMedia('(prefers-color-scheme: dark)'), onChange = () => {},
+} = {}) {
+  let media = null, attached = false;
+  function report() {
+    if (!media) return;
+    const dark = Boolean(media.matches);
+    onChange(dark);
+    send({ type: 'browser-appearance', dark });
+  }
+  function attach() {
+    if (attached) return;
+    try { media = query() || null; } catch (_) { media = null; }
+    if (!media) return;
+    if (typeof media.addEventListener === 'function') media.addEventListener('change', report);
+    else if (typeof media.addListener === 'function') media.addListener(report);
+    attached = true;
+  }
+  return {
+    open() { attach(); report(); },
+    // Re-read when the page is shown again; never deduplicated, because a reconnected socket has
+    // no memory of what the previous connection reported.
+    refresh() { attach(); report(); },
+    close() {
+      if (!media) return;
+      if (typeof media.removeEventListener === 'function') media.removeEventListener('change', report);
+      else if (typeof media.removeListener === 'function') media.removeListener(report);
+      media = null; attached = false;
+    },
   };
 }
 
@@ -840,26 +878,24 @@ export function createRtcReceiver(createRenderer, {
 // phone: battery, media volume and the radio carrying the stream. One circular mark in the flat
 // three-ring style - uniform strokes, round caps, no gradients. Dark frosted glass with light strokes,
 // because the gauge floats over a night map far more often than over a daylight route, and a mid-grey
-// track is the only way the empty part of both rings stays readable on either. Icons and language-free
-// labels only, so nothing needs a translation.
+// track is the only way the empty part of both rings stays readable on either. Numbers for the two
+// readings, a language-free icon for the transport, so nothing needs a translation.
 const phoneNetworks = ['wifi', '5g', '4g', '3g', '2g', 'cellular', 'eth', 'none'];
-// Every transport gets a word in the bottom opening - an empty notch reads as a broken gauge. The
-// fallbacks stay short: the opening between the arc caps only fits about five characters at this size.
-const phoneNetworkLabels = {
-  wifi: 'WIFI', '5g': '5G', '4g': '4G', '3g': '3G', '2g': '2G', cellular: 'NET', eth: 'LAN', none: 'OFF',
-};
-// Matches PhoneStatus.LOW_BATTERY_PERCENT; red is the driver-facing warning.
+// Matches PhoneStatus.LOW_BATTERY_PERCENT: at or above this the reading is healthy, below it the
+// driver-facing red warning takes over - unless the phone is on the charger.
 const lowBatteryPercent = 20;
 // Light strokes on dark glass, but held back from pure white: #f2f5f7 measured 17.5:1 against a night
 // map, which stings, while it was only 5.7:1 over a bright route. The track sits at 1.9:1 even where
-// the glass picks up a white strip, so an unfilled ring never reads as "no volume".
+// the glass picks up a white strip, so an unfilled ring never reads as "no volume". Only the battery
+// ring leaves that ink: green while the phone charges, red under the threshold.
 const badgeInk = '#dfe4e8', badgeTrack = '#8b95a1', badgeLow = '#ff453a', badgeCharging = '#30d158';
-const ringRadius = 44, ringStroke = 7.5, markScale = 0.86;
-// The glyph's own ink centre sits above the band between the number and the label, so it is nudged down
-// to land in the middle of that band instead of the middle of the circle.
+const ringRadius = 44, ringStroke = 9, markScale = 0.86;
+// The glyph's own ink centre sits above the band between the two numbers, so it is nudged down to land
+// in the middle of that band instead of the middle of the circle.
 const markShift = 1.8;
-// The rings part at the top for the battery number and at the bottom for the network label, so the two
-// readings sit on one axis; every ring still carries its own progress - left battery, right volume.
+// The rings part at the top for the battery number and at the bottom for the volume number, so the two
+// readings sit on one axis. Clockwise from the top the disc then reads battery number, battery arc,
+// volume number, volume arc - each arc fills clockwise from the opening its own number sits in.
 const ringGap = 26, ringEnd = 180 - ringGap;
 
 const counted = (value, limit) => {
@@ -867,17 +903,22 @@ const counted = (value, limit) => {
   return Number.isFinite(number) && number >= 0 ? Math.min(limit, Math.round(number)) : null;
 };
 
-// Angles run clockwise from 12 o'clock, so the two rings mirror each other around the number on top.
+// Angles run clockwise from 12 o'clock. A path always starts where its number sits, so the dash offset
+// grows clockwise: the battery from the top opening down the right, the volume from the bottom
+// opening up the left.
 const ringPoint = degrees => [
   50 + ringRadius * Math.sin(degrees * Math.PI / 180),
   50 - ringRadius * Math.cos(degrees * Math.PI / 180),
 ];
 
-function ringPath(side) {
-  const [x0, y0] = ringPoint(side * ringGap), [x1, y1] = ringPoint(side * ringEnd);
-  return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${ringRadius} ${ringRadius} 0 0 ${side < 0 ? 0 : 1}` +
+function ringPath(from, to) {
+  const [x0, y0] = ringPoint(from), [x1, y1] = ringPoint(to);
+  return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${ringRadius} ${ringRadius} 0 0 1` +
     ` ${x1.toFixed(1)} ${y1.toFixed(1)}`;
 }
+
+const batteryArc = ringPath(ringGap, ringEnd);
+const volumeArc = ringPath(180 + ringGap, 180 + ringEnd);
 
 /**
  * Progress is a dash offset over a fixed track rather than a re-cut path: `pathLength` normalises the
@@ -923,29 +964,30 @@ export function phoneGaugeValues(phone) {
   const volume = counted(phone.volume, 100);
   const bars = counted(phone.bars, 4) ?? 0;
   if (battery === null && volume === null && network === 'none') return null;
-  // The number inherits the battery arc colour; charging is told by the colour alone.
-  const batteryColor = battery !== null && battery < lowBatteryPercent ? badgeLow :
-    phone.charging === true ? badgeCharging : badgeInk;
+  // The number inherits the battery arc colour: green only while the phone charges, red under the
+  // threshold; a healthy reading keeps the same ink as the volume ring.
+  const batteryColor = phone.charging === true ? badgeCharging :
+    battery !== null && battery < lowBatteryPercent ? badgeLow : badgeInk;
   return { network, battery, volume, bars, batteryColor };
 }
 
 /** The gauge skeleton. Only the parts that never animate are fixed here; values arrive as styles. */
 export function phoneStatusMarkup(values) {
   const { network, battery, volume, bars, batteryColor } = values;
-  const ring = (side, name, color, percent) =>
-    `<path class="${name}-track" d="${ringPath(side)}" stroke="${badgeTrack}"/>` +
-    `<path class="${name}-level" d="${ringPath(side)}" pathLength="100" stroke-dasharray="${ringDashArray}"` +
+  const ring = (name, path, color, percent) =>
+    `<path class="${name}-track" d="${path}" stroke="${badgeTrack}"/>` +
+    `<path class="${name}-level" d="${path}" pathLength="100" stroke-dasharray="${ringDashArray}"` +
     ` stroke-dashoffset="${ringDash(percent)}" stroke="${color}"/>`;
   return '<svg viewBox="0 0 100 100" width="100%" height="100%" role="presentation">' +
     `<g class="rings" fill="none" stroke-width="${ringStroke}" stroke-linecap="round">` +
-    ring(-1, 'battery', batteryColor, battery) + ring(1, 'volume', badgeInk, volume) + '</g>' +
+    ring('battery', batteryArc, batteryColor, battery) + ring('volume', volumeArc, badgeInk, volume) + '</g>' +
     `<g class="mark" data-network="${network}" transform="translate(0 ${markShift}) translate(50 50) scale(${markScale}) translate(-50 -50)"` +
     ` fill="none" stroke-width="${markKind(network) === 'wifi' ? 5 : 0}" stroke-linecap="round">` +
     markSlots[markKind(network)].map(slot => slotMarkup(slot, bars)).join('') + '</g>' +
-    `<text class="mark-label" x="50" y="90.1" text-anchor="middle" fill="${badgeInk}"` +
-    ` font-size="12" font-weight="600">${phoneNetworkLabels[network]}</text>` +
     `<text class="battery-number" x="50" y="20" text-anchor="middle" fill="${batteryColor}"` +
-    ` font-size="15" font-weight="600">${battery === null ? '' : battery}</text></svg>`;
+    ` font-size="15" font-weight="600">${battery === null ? '' : battery}</text>` +
+    `<text class="volume-number" x="50" y="90" text-anchor="middle" fill="${badgeInk}"` +
+    ` font-size="15" font-weight="600">${volume === null ? '' : volume}</text></svg>`;
 }
 
 /**
@@ -966,8 +1008,8 @@ export function applyPhoneGauge(svg, values) {
     number.textContent = battery === null ? '' : String(battery);
     number.style.fill = batteryColor;
   }
-  const label = svg.querySelector('.mark-label');
-  if (label) label.textContent = phoneNetworkLabels[network];
+  const volumeNumber = svg.querySelector('.volume-number');
+  if (volumeNumber) volumeNumber.textContent = volume === null ? '' : String(volume);
   const mark = svg.querySelector('.mark');
   if (mark) {
     if (mark.dataset.network !== network) {
@@ -1036,6 +1078,8 @@ if (typeof document !== 'undefined') {
   const devicePreference = 'wheelplay.browserDevice';
   let pairingToken = null, qrGeneration = 0, qrTimer = null, qrRequest = null;
   let viewportReportTimer = null, lastViewportSignature = '';
+  // `null` until the browser reports: the diag line then says "unknown" instead of claiming light.
+  let browserDarkMode = null;
   const ignoreZoomOption = $('ignore-browser-zoom');
   const ignoreZoomPreference = 'wheelplay.ignoreBrowserZoom';
   try { ignoreZoomOption.checked = window.localStorage.getItem(ignoreZoomPreference) === 'true'; } catch (_) {}
@@ -1274,6 +1318,7 @@ if (typeof document !== 'undefined') {
     point: (event, surface, clamp) => mapPoint(event.clientX, event.clientY, surface.getBoundingClientRect(), width, height, clamp) });
   let desktopRevision = presentation.current.revision;
   const browserMedia = createBrowserMediaSession({ send });
+  const browserAppearance = createAppearanceReporter({ send, onChange: dark => { browserDarkMode = dark; } });
   const browserAudio = createBrowserAudio({
     send,
     useElementSink: mediaSessionMode === '2',
@@ -1375,9 +1420,12 @@ if (typeof document !== 'undefined') {
     $('status').textContent = (value.state === 'recovering' ? t('web_video_recovering', transport) :
       value.visible ? value.interactive ? t('web_transport_touch_connected', transport, rtc?.recovering ? t('web_waiting_for_recovery') : '') :
         t('web_video_input_unavailable', transport) : t('web_connected_waiting_for_iphone_video')) + diagnostic + hint;
+    // `?diag=1` is the only way to tell a head unit that reports its own light/dark preference
+    // from one that always answers light: flip the car's appearance and watch this word.
+    const schemeLine = `scheme=${browserDarkMode === null ? 'unknown' : browserDarkMode ? 'dark' : 'light'}`;
     const panel = $('diag-panel');
     panel.hidden = !diagnosticStatus;
-    if (diagnosticStatus) panel.textContent = detail;
+    if (diagnosticStatus) panel.textContent = [detail, schemeLine].filter(Boolean).join('\n');
     // The overlay is the only status surface after the top bar is hidden; never duplicate a
     // status line that is already on screen.
     const topbarHidden = $('topbar').hidden;
@@ -1437,6 +1485,7 @@ if (typeof document !== 'undefined') {
     if (socket) { const old = socket; socket = null; old.close(); }
     presentation.close(); cleanupRtc(); cleanupImage();
     browserMedia.close(); browserAudio.close(); $('audio-message').hidden = true;
+    browserAppearance.close();
     browserLocation.close();
     renderPhoneStatus(null);
     $('topbar').hidden = false; $('pairing').hidden = false; $('display').hidden = true;
@@ -1563,7 +1612,7 @@ if (typeof document !== 'undefined') {
         cancelMove(); pointers.clear(); presentation.close(); ws.close();
       } });
       paired = true; attempts = 0; lastStatus = Date.now();
-      browserMedia.open(); browserAudio.attach();
+      browserMedia.open(); browserAudio.attach(); browserAppearance.open();
       browserLocation.attach();
       cleanupRtc();
       presentation.open();
@@ -1703,6 +1752,7 @@ if (typeof document !== 'undefined') {
       socket = null; pointers.clear(); desktop.release(false); pointerInput = false; keyboardInput = false;
       clearInterval(heartbeat); presentation.close(); cleanupRtc(); cleanupImage();
       browserMedia.close(); browserAudio.close(); $('audio-message').hidden = true;
+      browserAppearance.close();
       browserLocation.close();
       renderPhoneStatus(null);
       if (stopped) return;
@@ -1834,7 +1884,13 @@ if (typeof document !== 'undefined') {
   }
   for (const surface of [...screens, canvas, touchSurface]) bindSurface(surface);
   window.addEventListener('blur', release);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) release(); presentation.refresh(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) release();
+    presentation.refresh();
+    // A head unit normally leaves the page to change its own appearance, so coming back is the
+    // most likely moment for a preference the `change` event never delivered.
+    if (!document.hidden) browserAppearance.refresh();
+  });
   window.addEventListener('pagehide', () => disconnect(false));
   window.addEventListener('pageshow', event => { if (event.persisted) initializePairing(); });
   const linkedCode = pairingCodeFromUrl(window.location?.search || '');

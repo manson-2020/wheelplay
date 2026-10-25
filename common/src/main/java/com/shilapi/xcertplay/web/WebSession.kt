@@ -231,6 +231,25 @@ internal object WebSession {
         refreshAppearance(context)
     }
 
+    /**
+     * The light/dark preference the head-unit browser reported from its `prefers-color-scheme`
+     * media query, or null until one arrives. Kept after the viewer disconnects because the head
+     * unit's appearance belongs to the car, not to the WebSocket, so a transient drop must not
+     * flip CarPlay back to the Android value. A head unit that never reports leaves this null, and
+     * [CarPlayAppearance.FOLLOW_DISPLAY] then resolves to the Android value.
+     */
+    @Volatile
+    var browserDarkMode: Boolean? = null
+        private set
+
+    /** Called from the WebSocket thread when the browser's dark-mode media query changes. */
+    fun reportBrowserAppearance(dark: Boolean) {
+        if (browserDarkMode == dark) return
+        browserDarkMode = dark
+        Log.i("WheelPlayWeb", "browser-appearance dark=$dark")
+        experienceContext?.let { refreshAppearance(it) }
+    }
+
     fun refreshAppearance(context: Context) =
         refreshAppearance(context, isDarkMode(context.resources.configuration.uiMode))
 
@@ -244,7 +263,8 @@ internal object WebSession {
         val controller = projectionSessions.snapshot() ?: return
         preferenceExecutor.execute {
             if (projectionSessions.snapshot() === controller) {
-                val night = AirPlayPersistence.loadAppearance(context).night(systemNight)
+                val night = AirPlayPersistence.loadAppearance(context)
+                    .night(systemNight, browserDarkMode, localDisplayActive)
                 projectionSessions.setNightMode(controller, night)
             }
         }
@@ -768,6 +788,8 @@ internal object WebSession {
             }
         localDisplayActive = true
         notifyViewport()
+        // The displaying device just changed, so a follow-the-display choice must re-resolve now.
+        experienceContext?.let { refreshAppearance(it) }
     }
 
     /**
@@ -781,6 +803,8 @@ internal object WebSession {
         localDisplayActive = false
         localPhoneViewport = null
         if (hasViewer) notifyViewport()
+        // Back to the browser: the follow-the-display choice returns to the browser's preference.
+        experienceContext?.let { refreshAppearance(it) }
     }
 
     fun reportBrowserViewport(width: Int, height: Int): Boolean {

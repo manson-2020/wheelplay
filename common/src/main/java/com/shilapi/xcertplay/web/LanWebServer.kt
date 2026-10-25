@@ -770,6 +770,10 @@ internal class LanWebServer(
                         val height = data.getInt("height")
                         require(WebSession.reportBrowserViewport(width, height))
                     }
+                    // The browser's own prefers-color-scheme result, used only by the
+                    // "follow browser" appearance choice. Cheap enough to send on every flip.
+                    "browser-appearance" ->
+                        WebSession.reportBrowserAppearance(data.getBoolean("dark"))
                     "ping" -> {
                         val transitions = data.optInt("liveTransitions", -1)
                         if (transitions >= 0 && transitions != lastLiveTransitions) {
