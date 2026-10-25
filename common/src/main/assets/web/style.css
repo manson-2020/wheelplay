@@ -21,9 +21,10 @@
 #media-message{position:absolute;left:16px;top:16px;z-index:2;max-width:85%;padding:10px 14px;background:#1c2428e8;border-radius:12px;font-size:13px;color:#efbe90;pointer-events:none}
 
 /* The phone's own battery, volume and signal in one circular gauge, floating over the picture in the
-   corner the iPhone status bar leaves free. Flat uniform strokes with round caps and no gradients. The
-   glass is dark because the gauge sits over a night map: on a light disc the grey track of an unfilled
-   ring simply disappears. Drag it anywhere; a double tap returns it to this corner. */
+   corner the iPhone status bar leaves free. Flat strokes, no gradients: a solid battery arc and a
+   ticked volume meter, so the two readings never look alike. The glass is dark because the gauge sits
+   over a night map: on a light disc the grey track of an unfilled ring simply disappears. Drag it
+   anywhere; a double tap returns it to this corner. */
 #phone-status{position:absolute;right:16px;top:16px;z-index:3;box-sizing:border-box;width:88px;height:88px;padding:2px;border-radius:50%;background:#12171ccc;border:1px solid #ffffff38;box-shadow:0 6px 18px #00000059;-webkit-backdrop-filter:blur(16px) saturate(1.15);backdrop-filter:blur(16px) saturate(1.15);touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 #phone-status.dragging{cursor:grabbing;box-shadow:0 10px 26px #00000040}
 #phone-status svg{display:block;width:100%;height:100%}

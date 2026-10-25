@@ -77,27 +77,37 @@ class PhoneStatusGaugeViewTest {
         )
     }
 
-    /** The left arc now carries the volume, the right one the battery - read clockwise from the top. */
-    private fun volumeArc(bitmap: Bitmap) = brightest(bitmap, center - radius, center.toFloat(), 6)
+    /** The left side is the volume meter, the right one the battery - read clockwise from the top. */
+    private fun volumeMeter(bitmap: Bitmap) = brightest(bitmap, center - radius, center.toFloat(), 6)
     private fun batteryArc(bitmap: Bitmap) = brightest(bitmap, center + radius, center.toFloat(), 6)
 
     @Test
-    fun aZeroReadingKeepsBothArcMidpointsOnTheGreyTrack() {
+    fun aZeroReadingKeepsTheBatteryArcAndTheMeterOnTheGreyTrack() {
         val bitmap = render(0, 0)
-        val left = volumeArc(bitmap)
+        val left = volumeMeter(bitmap)
         val right = batteryArc(bitmap)
         // Ink is what a sliver of progress looks like; the track must survive so the ring reads as empty.
         assertTrue("an empty battery arc must not show ink, found $right", right < 190)
-        assertTrue("an empty volume arc must not show ink, found $left", left < 190)
+        assertTrue("an empty meter must not show ink, found $left", left < 190)
         assertTrue("an empty ring must still draw its track, found $right", right > 60)
-        assertTrue("an empty ring must still draw its track, found $left", left > 60)
+        assertTrue("an empty meter must still draw its ticks, found $left", left > 60)
     }
 
     @Test
-    fun aFullReadingPaintsInkAcrossBothArcs() {
+    fun aFullReadingPaintsInkAcrossTheArcAndTheMeter() {
         val bitmap = render(100, 100)
         assertTrue("a full battery arc must be ink, found ${batteryArc(bitmap)}", batteryArc(bitmap) > 200)
-        assertTrue("a full volume arc must be ink, found ${volumeArc(bitmap)}", volumeArc(bitmap) > 200)
+        assertTrue("a full meter must be ink, found ${volumeMeter(bitmap)}", volumeMeter(bitmap) > 200)
+    }
+
+    @Test
+    fun theVolumeMeterLeavesAGapBetweenItsTicks() {
+        val bitmap = render(88, 100)
+        // 9 o'clock falls between the fourth and fifth tick, and even a full meter keeps that gap dark.
+        val gap = ringColor(bitmap, 180f)
+        val tick = ringColor(bitmap, 172f)
+        assertTrue("the gap between two ticks must stay empty, found $gap", Color.green(gap) < 160)
+        assertTrue("a lit tick must be ink, found $tick", Color.green(tick) > 200)
     }
 
     @Test
@@ -120,13 +130,14 @@ class PhoneStatusGaugeViewTest {
     }
 
     @Test
-    fun theTopAndBottomOpeningsStayBareForTheNumberAndTheWord() {
+    fun theCollarStopsShortOfTheArcCaps() {
         val bitmap = render(88, 64)
-        // Sample just outside the ring, clear of the glyph descenders that reach into the openings.
-        val top = brightest(bitmap, center.toFloat(), center - radius - 5, 2)
-        val bottom = brightest(bitmap, center.toFloat(), center + radius + 5, 2)
-        assertTrue("the top opening must stay open, found $top", top < 190)
-        assertTrue("the bottom opening must stay open, found $bottom", bottom < 190)
+        val unit = radius / PhoneGaugeGeometry.RING_RADIUS
+        // Between the collar's end and the arc's round cap the opening stays empty, top and bottom.
+        val top = brightest(bitmap, center + 18.7f * unit, center - 41.4f * unit, 1)
+        val bottom = brightest(bitmap, center + 18.7f * unit, center + 41.4f * unit, 1)
+        assertTrue("the collar must not touch the top cap, found $top", top < 190)
+        assertTrue("the collar must not touch the bottom cap, found $bottom", bottom < 190)
     }
 
     @Test
@@ -154,6 +165,18 @@ class PhoneStatusGaugeViewTest {
         // A reading that repeats itself is not worth a frame.
         view.apply(PhoneStatus.Snapshot(64, true, 40, "wifi", 3), animate = false)
         assertFalse("an unchanged reading must not repaint", shadow.wasInvalidated())
+    }
+
+    @Test
+    fun eachNumberSitsUnderItsOwnCollarArc() {
+        val bitmap = render(84, 20)
+        val unit = radius / PhoneGaugeGeometry.RING_RADIUS
+        // The middle of the battery collar and of the volume collar; both sit on the disc's axis.
+        val batteryCollar = brightest(bitmap, center.toFloat(), center - 46.5f * unit, 3)
+        // The volume collar is dashed, so the window spans a whole dash period.
+        val volumeCollar = brightest(bitmap, center.toFloat(), center + 46.5f * unit, 5)
+        assertTrue("the battery number needs its solid arc, found $batteryCollar", batteryCollar > 200)
+        assertTrue("the volume number needs its dashed arc, found $volumeCollar", volumeCollar > 200)
     }
 
     @Test

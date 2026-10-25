@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Canvas
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -47,6 +48,12 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         strokeJoin = Paint.Join.ROUND
     }
     private val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    // Rounded ends, like the battery's: a round cap reaches half a stroke past the arc, which the tick
+    // slot accounts for in its gap so neighbouring ticks never touch.
+    private val tickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
     private val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = GLASS
@@ -60,11 +67,13 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
+    private val readingRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val box = RectF()
+    private val collarBox = RectF()
 
     private var values: PhoneStatus.Snapshot? = null
     private var batteryOffset = PhoneGaugeGeometry.EMPTY_OFFSET
-    private var volumeOffset = PhoneGaugeGeometry.EMPTY_OFFSET
+    private var volumeLevel = 0f
     private var batteryColor = INK
     private var sweep: ValueAnimator? = null
 
@@ -216,8 +225,8 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
             else -> INK
         }
         val targetBattery = PhoneGaugeGeometry.dashOffset(next.battery)
-        val targetVolume = PhoneGaugeGeometry.dashOffset(next.volume)
-        if (targetBattery == batteryOffset && targetVolume == volumeOffset) {
+        val targetVolume = PhoneGaugeGeometry.levelFraction(next.volume)
+        if (targetBattery == batteryOffset && targetVolume == volumeLevel) {
             // Neither arc moves, but the numbers, the colour the plug state drives or the transport icon
             // may still have changed: they live in the reading, and only a repaint puts them on glass.
             if (previous != next) invalidate()
@@ -227,7 +236,7 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
             sweep?.cancel()
             sweep = null
             batteryOffset = targetBattery
-            volumeOffset = targetVolume
+            volumeLevel = targetVolume
             invalidate()
             return
         }
@@ -235,14 +244,14 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         // arcs by hand so a reading that changes every couple of seconds sweeps instead of flicking.
         sweep?.cancel()
         val fromBattery = batteryOffset
-        val fromVolume = volumeOffset
+        val fromVolume = volumeLevel
         sweep = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = SWEEP_MILLIS
             interpolator = PathInterpolator(0.22f, 1f, 0.36f, 1f)
             addUpdateListener { animation ->
                 val fraction = animation.animatedFraction
                 batteryOffset = fromBattery + (targetBattery - fromBattery) * fraction
-                volumeOffset = fromVolume + (targetVolume - fromVolume) * fraction
+                volumeLevel = fromVolume + (targetVolume - fromVolume) * fraction
                 invalidate()
             }
             start()
@@ -265,29 +274,56 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
 
         box.set(cx - radius, cy - radius, cx + radius, cy + radius)
         val stroke = PhoneGaugeGeometry.RING_STROKE * unit
-        // Every ring sits in the same box, so both arcs keep their caps inside the two openings. Both
-        // grow clockwise from their own opening: the battery down the right, the volume up the left.
-        drawRing(canvas, TRACK, PhoneGaugeGeometry.BATTERY_START_DEGREES, PhoneGaugeGeometry.ARC_DEGREES, stroke)
-        drawRing(canvas, TRACK, PhoneGaugeGeometry.VOLUME_START_DEGREES, PhoneGaugeGeometry.ARC_DEGREES, stroke)
+        // Every ring sits in the same box, so both arcs keep their caps inside the two openings. The
+        // battery grows clockwise down the right; the volume is a meter of ticks up the left.
+        val batteryStart = PhoneGaugeGeometry.BATTERY_START_DEGREES + PhoneGaugeGeometry.BATTERY_INSET_DEGREES
+        drawRing(canvas, TRACK, batteryStart, PhoneGaugeGeometry.BATTERY_ARC_DEGREES, stroke)
         drawRing(
-            canvas, batteryColor, PhoneGaugeGeometry.BATTERY_START_DEGREES,
+            canvas, batteryColor, batteryStart,
             PhoneGaugeGeometry.sweepDegrees(batteryOffset), stroke,
         )
-        drawRing(
-            canvas, INK, PhoneGaugeGeometry.VOLUME_START_DEGREES,
-            PhoneGaugeGeometry.sweepDegrees(volumeOffset), stroke,
-        )
+        drawVolumeTicks(canvas, unit)
 
         drawMark(canvas, snapshot, cx, cy, unit)
 
-        // Read clockwise from the top: battery number, battery arc, volume number, volume arc.
+        // Read clockwise from the top: battery number, battery arc, volume number, volume meter. Each
+        // number carries a short arc on its outer side - solid above the battery, dashed below the
+        // volume - repeating the grammar of the two long arcs; two bare numbers cannot be told apart.
         val batteryText = if (snapshot.battery < 0) "" else snapshot.battery.toString()
         val volumeText = if (snapshot.volume < 0) "" else snapshot.volume.toString()
-        numberPaint.textSize = 15f * unit
-        numberPaint.color = batteryColor
-        canvas.drawText(batteryText, cx, cy + (20f - 50f) * unit, numberPaint)
-        numberPaint.color = INK
-        canvas.drawText(volumeText, cx, cy + (90f - 50f) * unit, numberPaint)
+        drawReading(canvas, batteryText, batteryColor, cx, cy, BATTERY_BASELINE, unit, dashed = false, atTop = true)
+        drawReading(canvas, volumeText, INK, cx, cy, VOLUME_BASELINE, unit, dashed = true, atTop = false)
+    }
+
+    /** A number with a matching arc on the side away from the middle, exactly as the browser draws it. */
+    private fun drawReading(
+        canvas: Canvas,
+        text: String,
+        color: Int,
+        cx: Float,
+        cy: Float,
+        baseline: Float,
+        unit: Float,
+        dashed: Boolean,
+        atTop: Boolean,
+    ) {
+        if (text.isEmpty()) return
+        val radius = COLLAR_RADIUS * unit
+        collarBox.set(cx - radius, cy - radius, cx + radius, cy + radius)
+        readingRingPaint.color = color
+        readingRingPaint.strokeWidth = COLLAR_STROKE * unit
+        // The dashes need butt ends: with round ones a 2.6 stroke would fill its own gap.
+        readingRingPaint.strokeCap = if (dashed) Paint.Cap.BUTT else Paint.Cap.ROUND
+        readingRingPaint.pathEffect = if (dashed) {
+            DashPathEffect(floatArrayOf(COLLAR_DASH_ON * unit, COLLAR_DASH_OFF * unit), 0f)
+        } else {
+            null
+        }
+        val centre = if (atTop) -90f + COLLAR_CENTRE else 90f - COLLAR_CENTRE
+        canvas.drawArc(collarBox, centre - COLLAR_DEGREES, 2f * COLLAR_DEGREES, false, readingRingPaint)
+        numberPaint.textSize = NUMBER_SIZE * unit
+        numberPaint.color = color
+        canvas.drawText(text, cx, cy + (baseline - 50f) * unit, numberPaint)
     }
 
     private fun drawRing(canvas: Canvas, color: Int, start: Float, sweep: Float, stroke: Float) {
@@ -297,9 +333,23 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         canvas.drawArc(box, start, sweep, false, ringPaint)
     }
 
+    /** The volume meter: eight ticks that light clockwise from the bottom opening, as the browser does. */
+    private fun drawVolumeTicks(canvas: Canvas, unit: Float) {
+        tickPaint.strokeWidth = PhoneGaugeGeometry.TICK_STROKE * unit
+        for (index in 0 until PhoneGaugeGeometry.TICK_COUNT) {
+            val start = PhoneGaugeGeometry.tickStartDegrees(index)
+            tickPaint.color = TRACK
+            canvas.drawArc(box, start, PhoneGaugeGeometry.tickSweepDegrees(index, 1f), false, tickPaint)
+            val lit = PhoneGaugeGeometry.tickSweepDegrees(index, volumeLevel)
+            if (lit <= 0f) continue
+            tickPaint.color = INK
+            canvas.drawArc(box, start, lit, false, tickPaint)
+        }
+    }
+
     /**
-     * Both marks share one box - scaled and nudged down to the band between the number and the word -
-     * so switching networks never changes the icon's size, exactly like the browser's `mark` group.
+     * Both marks share one box - scaled and nudged down to the band between the two numbers - so
+     * switching networks never changes the icon's size, exactly like the browser's `mark` group.
      */
     private fun drawMark(canvas: Canvas, snapshot: PhoneStatus.Snapshot, cx: Float, cy: Float, unit: Float) {
         canvas.save()
@@ -357,6 +407,21 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         const val POLL_MILLIS = 1_000L
         const val DRAG_SLOP_DP = 8f
 
+        // A reading is a number with a short arc outside it: solid above the battery, dashed below the
+        // volume, in the number's own colour. The collar is nudged half the difference between the two
+        // neighbouring caps, so the gap on its left and right match and it reads as centred.
+        const val NUMBER_SIZE = 14f
+        const val COLLAR_RADIUS = 46.5f
+        const val COLLAR_STROKE = 2.6f
+        const val COLLAR_DEGREES = 20f
+        const val COLLAR_CENTRE = 0f
+        const val COLLAR_DASH_ON = 2.6f
+        const val COLLAR_DASH_OFF = 2.81f
+        // A step further in than the collar's edge: at 2.5 units the digits read as pressed against
+        // the arc, at 3.8 they read as a reading under it.
+        const val BATTERY_BASELINE = 18.7f
+        const val VOLUME_BASELINE = 91.3f
+
         const val INK = 0xFFDFE4E8.toInt()
         const val TRACK = 0xFF8B95A1.toInt()
         const val LOW = 0xFFFF453A.toInt()
@@ -373,10 +438,15 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
  * round cap behind at either end of the opening.
  */
 internal object PhoneGaugeGeometry {
-    /** 180 degrees minus the two 26 degree openings. */
+    /** 180 degrees minus the two 26 degree openings: the span both readings lay their ink over. */
     const val ARC_DEGREES = 180f - 2f * 26f
     const val RING_RADIUS = 44f
     const val RING_STROKE = 9f
+    // The meter's outermost tick stops 5.25 degrees inside the opening and its cap is only 4.2 wide, so
+    // the volume run ends 27.0 degrees from the opening while the battery arc's fatter cap reached 20.1.
+    // The same inset on the battery side aligns both ends - the left side used to read as shorter.
+    const val BATTERY_INSET_DEGREES = 6.9f
+    const val BATTERY_ARC_DEGREES = ARC_DEGREES - 2f * BATTERY_INSET_DEGREES
     private const val STUB_PERCENT = 6f
     const val EMPTY_OFFSET = 107f
     // Canvas angles start at 3 o'clock while the SVG starts at 12 o'clock, hence the quarter turn. Every
@@ -384,6 +454,25 @@ internal object PhoneGaugeGeometry {
     // down the right, the volume from the bottom one up the left.
     const val BATTERY_START_DEGREES = 26f - 90f
     const val VOLUME_START_DEGREES = 180f + 26f - 90f
+    // The volume side is a level meter, not a second progress arc: eight rounded ticks that own one
+    // slot each, thinner than the battery stroke, so the readings differ by silhouette alone. A round
+    // cap reaches half a stroke past its arc, so the slot spends that much on gap at either end.
+    const val TICK_COUNT = 8
+    const val TICK_STROKE = 6.5f
+    private const val TICK_SLOT_DEGREES = ARC_DEGREES / TICK_COUNT
+    private const val TICK_GAP_DEGREES = 10.5f
+
+    /** Where a tick starts, clockwise from the bottom opening. */
+    fun tickStartDegrees(index: Int): Float =
+        VOLUME_START_DEGREES + index * TICK_SLOT_DEGREES + TICK_GAP_DEGREES / 2f
+
+    /** The arc a tick covers at [level]; the tick holding the level is filled part of the way. */
+    fun tickSweepDegrees(index: Int, level: Float): Float =
+        (level * TICK_COUNT - index).coerceIn(0f, 1f) * (TICK_SLOT_DEGREES - TICK_GAP_DEGREES)
+
+    /** The volume as the 0..1 share of the meter; an unreadable reading lights nothing. */
+    fun levelFraction(volume: Int?): Float =
+        if (volume == null || volume < 0) 0f else volume.coerceAtMost(100) / 100f
 
     /** A reading too small to see still leaves a stub, so it never reads as a missing stroke. */
     fun dashOffset(percent: Int?): Float =
@@ -391,7 +480,7 @@ internal object PhoneGaugeGeometry {
 
     /** Degrees of arc an offset covers; at or past 100 nothing is drawn. */
     fun sweepDegrees(offset: Float): Float =
-        ((100f - offset) / 100f).coerceAtLeast(0f) * ARC_DEGREES
+        ((100f - offset) / 100f).coerceAtLeast(0f) * BATTERY_ARC_DEGREES
 
     /** An empty circle must never float over the picture, the same rule the browser applies. */
     fun showsGauge(snapshot: PhoneStatus.Snapshot?): Boolean =

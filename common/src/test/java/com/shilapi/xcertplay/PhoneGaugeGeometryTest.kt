@@ -31,9 +31,19 @@ class PhoneGaugeGeometryTest {
         // Exactly one path length would leave the round cap sitting on the arc's start.
         assertEquals(0f, PhoneGaugeGeometry.sweepDegrees(100f), 0.001f)
         assertEquals(0f, PhoneGaugeGeometry.sweepDegrees(120f), 0.001f)
-        assertEquals(7.68f, PhoneGaugeGeometry.sweepDegrees(94f), 0.001f)
-        assertEquals(112.64f, PhoneGaugeGeometry.sweepDegrees(12f), 0.001f)
-        assertEquals(PhoneGaugeGeometry.ARC_DEGREES, PhoneGaugeGeometry.sweepDegrees(0f), 0.001f)
+        assertEquals(6.852f, PhoneGaugeGeometry.sweepDegrees(94f), 0.001f)
+        assertEquals(100.496f, PhoneGaugeGeometry.sweepDegrees(12f), 0.001f)
+        assertEquals(PhoneGaugeGeometry.BATTERY_ARC_DEGREES, PhoneGaugeGeometry.sweepDegrees(0f), 0.001f)
+    }
+
+    @Test
+    fun theBatteryArcIsInsetToEndWhereTheMeterDoes() {
+        // The tick meter's outer tick stops 5.25 degrees short of the opening and its round cap only
+        // reaches 4.23 further; the battery arc's cap reaches 5.86. The inset makes up the difference,
+        // so both runs stop 27 degrees from the opening and neither side reads as shorter.
+        assertEquals(6.9f, PhoneGaugeGeometry.BATTERY_INSET_DEGREES, 0.001f)
+        assertEquals(114.2f, PhoneGaugeGeometry.BATTERY_ARC_DEGREES, 0.001f)
+        assertEquals(128f, PhoneGaugeGeometry.ARC_DEGREES, 0.001f)
     }
 
     @Test
@@ -47,6 +57,33 @@ class PhoneGaugeGeometryTest {
         // left above its own.
         assertEquals(64f, PhoneGaugeGeometry.BATTERY_START_DEGREES + PhoneGaugeGeometry.ARC_DEGREES, 0.001f)
         assertEquals(244f, PhoneGaugeGeometry.VOLUME_START_DEGREES + PhoneGaugeGeometry.ARC_DEGREES, 0.001f)
+    }
+
+    @Test
+    fun theVolumeMeterIsEightTicksWithGapsBetween() {
+        assertEquals(8, PhoneGaugeGeometry.TICK_COUNT)
+        // Sixteen degree slots. A round cap reaches 4.23 degrees past each end, so the slot gives up
+        // 10.5 of it to gap and the tick body is the remaining 5.5.
+        assertEquals(121.25f, PhoneGaugeGeometry.tickStartDegrees(0), 0.001f)
+        assertEquals(233.25f, PhoneGaugeGeometry.tickStartDegrees(7), 0.001f)
+        assertEquals(5.5f, PhoneGaugeGeometry.tickSweepDegrees(0, 1f), 0.001f)
+        // The last tick's cap stops at 242.5, clear of the top opening that starts at 244.
+        assertEquals(
+            238.75f,
+            PhoneGaugeGeometry.tickStartDegrees(7) + PhoneGaugeGeometry.tickSweepDegrees(7, 1f),
+            0.001f,
+        )
+        // The tick holding the level is filled part of the way; the ones past it stay empty.
+        assertEquals(1.1f, PhoneGaugeGeometry.tickSweepDegrees(3, 0.4f), 0.001f)
+        assertEquals(0f, PhoneGaugeGeometry.tickSweepDegrees(4, 0.4f), 0.001f)
+    }
+
+    @Test
+    fun anUnreadableVolumeLightsNoTick() {
+        assertEquals(0f, PhoneGaugeGeometry.levelFraction(null), 0.001f)
+        assertEquals(0f, PhoneGaugeGeometry.levelFraction(-1), 0.001f)
+        assertEquals(0.4f, PhoneGaugeGeometry.levelFraction(40), 0.001f)
+        assertEquals(1f, PhoneGaugeGeometry.levelFraction(150), 0.001f)
     }
 
     @Test

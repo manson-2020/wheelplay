@@ -875,11 +875,12 @@ export function createRtcReceiver(createRenderer, {
 }
 
 // The status bar inside the picture belongs to the iPhone, so the server also reports this Android
-// phone: battery, media volume and the radio carrying the stream. One circular mark in the flat
-// three-ring style - uniform strokes, round caps, no gradients. Dark frosted glass with light strokes,
-// because the gauge floats over a night map far more often than over a daylight route, and a mid-grey
-// track is the only way the empty part of both rings stays readable on either. Numbers for the two
-// readings, a language-free icon for the transport, so nothing needs a translation.
+// phone: battery, media volume and the radio carrying the stream. One circular mark, flat strokes and
+// no gradients: the battery is a solid arc and the volume a meter of ticks, so the two readings differ
+// by silhouette alone. Dark frosted glass with light strokes, because the gauge floats over a night map
+// far more often than over a daylight route, and a mid-grey track is the only way the empty part of
+// either stays readable on both. Numbers for the two readings, a language-free icon for the transport,
+// so nothing needs a translation.
 const phoneNetworks = ['wifi', '5g', '4g', '3g', '2g', 'cellular', 'eth', 'none'];
 // Matches PhoneStatus.LOW_BATTERY_PERCENT: at or above this the reading is healthy, below it the
 // driver-facing red warning takes over - unless the phone is on the charger.
@@ -895,8 +896,16 @@ const ringRadius = 44, ringStroke = 9, markScale = 0.86;
 const markShift = 1.8;
 // The rings part at the top for the battery number and at the bottom for the volume number, so the two
 // readings sit on one axis. Clockwise from the top the disc then reads battery number, battery arc,
-// volume number, volume arc - each arc fills clockwise from the opening its own number sits in.
+// volume number, volume meter - each fills clockwise from the opening its own number sits in.
 const ringGap = 26, ringEnd = 180 - ringGap;
+// The volume is a level meter, not a second progress arc: eight rounded ticks, thinner than the
+// battery stroke, so the two readings differ in silhouette instead of needing a colour of their own.
+// A round cap reaches half a stroke past its arc, so the slot has to give up that much at each end.
+const tickCount = 8, tickStroke = 6.5, tickGap = 10.5, tickSlot = (ringEnd - ringGap) / tickCount;
+// The meter's outermost tick stops 5.25 degrees inside the opening and its round cap is only 4.2 wide,
+// so the volume run ends 27.0 degrees from the opening while the battery arc's fatter cap reached 20.1 -
+// the left side read as shorter. Insetting the battery arc by that difference aligns both ends.
+const batteryInset = 6.9;
 
 const counted = (value, limit) => {
   const number = Number(value);
@@ -906,19 +915,26 @@ const counted = (value, limit) => {
 // Angles run clockwise from 12 o'clock. A path always starts where its number sits, so the dash offset
 // grows clockwise: the battery from the top opening down the right, the volume from the bottom
 // opening up the left.
-const ringPoint = degrees => [
-  50 + ringRadius * Math.sin(degrees * Math.PI / 180),
-  50 - ringRadius * Math.cos(degrees * Math.PI / 180),
+const ringPoint = (degrees, radius = ringRadius) => [
+  50 + radius * Math.sin(degrees * Math.PI / 180),
+  50 - radius * Math.cos(degrees * Math.PI / 180),
 ];
 
-function ringPath(from, to) {
-  const [x0, y0] = ringPoint(from), [x1, y1] = ringPoint(to);
-  return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${ringRadius} ${ringRadius} 0 0 1` +
+function ringPath(from, to, radius = ringRadius) {
+  const [x0, y0] = ringPoint(from, radius), [x1, y1] = ringPoint(to, radius);
+  return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${radius} ${radius} 0 0 1` +
     ` ${x1.toFixed(1)} ${y1.toFixed(1)}`;
 }
 
-const batteryArc = ringPath(ringGap, ringEnd);
-const volumeArc = ringPath(180 + ringGap, 180 + ringEnd);
+const batteryArc = ringPath(ringGap + batteryInset, ringEnd - batteryInset);
+
+// Every tick owns one slot of the volume side with half a gap at each end, so neighbours never touch.
+function tickPath(index) {
+  const from = 180 + ringGap + index * tickSlot + tickGap / 2;
+  return ringPath(from, from + tickSlot - tickGap);
+}
+
+const volumeTicks = Array.from({ length: tickCount }, (_, index) => tickPath(index));
 
 /**
  * Progress is a dash offset over a fixed track rather than a re-cut path: `pathLength` normalises the
@@ -932,6 +948,13 @@ const volumeArc = ringPath(180 + ringGap, 180 + ringEnd);
 const ringEmpty = 107, ringDashArray = '100 300';
 const ringDash = percent =>
   percent === null || percent <= 0 ? ringEmpty : 100 - Math.max(6, percent);
+// The same offset trick per tick, without the stub: a tick the level has not reached yet is simply
+// empty, and the tick holding the level is filled part of the way. Whole numbers keep the markup clean.
+const tickDash = (percent, index) => {
+  if (percent === null) return 100;
+  const share = Math.max(0, Math.min(1, percent * tickCount / 100 - index));
+  return 100 - Math.round(share * 100);
+};
 
 // Both marks share one box, so switching networks never changes the icon's size. Every slot carries the
 // strength that lights it: the Wi-Fi fans fill from the inside out, the cellular bars from the left.
@@ -971,23 +994,56 @@ export function phoneGaugeValues(phone) {
   return { network, battery, volume, bars, batteryColor };
 }
 
+// Two bare numbers on one axis cannot be told apart - worst of all the volume, because the battery arc
+// ends right beside it. So each number gets a short arc on its outer side instead of a full ring:
+// solid above the battery, dashed below the volume.
+const numberFont = 14, collarRadius = 46.5, collarStroke = 2.6, collarDegrees = 20;
+// The numbers sit a step further in than the collar's edge on purpose: at 2.5 units the digits read as
+// pressed against the arc, at 3.8 they read as a reading under it.
+const batteryBaseline = 18.7, volumeBaseline = 91.3;
+// With both runs ending on the same angle the collar can sit on the disc's axis and still leave the
+// same gap either side.
+const collarCentre = 0;
+// Butt caps and a gap wider than the dash: the dashes have to read as dashes next to a solid one.
+const collarDash = '2.6 2.81';
+const batteryCollar = ringPath(collarCentre - collarDegrees, collarCentre + collarDegrees, collarRadius);
+const volumeCollar = ringPath(
+  180 - collarCentre - collarDegrees, 180 - collarCentre + collarDegrees, collarRadius,
+);
+
+/** A reading: its number, with a matching arc on the side away from the disc's middle. */
+const reading = (value, className, color, baseline, collar, dashed) => {
+  const text = value === null ? '' : String(value);
+  if (text === '') return '';
+  return `<path class="${dashed ? 'volume-collar' : 'battery-collar'}" d="${collar}" fill="none"` +
+    ` stroke="${color}" stroke-width="${collarStroke}" stroke-linecap="${dashed ? 'butt' : 'round'}"` +
+    (dashed ? ` stroke-dasharray="${collarDash}"` : '') + '/>' +
+    `<text class="${className}" x="50" y="${baseline}" text-anchor="middle" fill="${color}"` +
+    ` font-size="${numberFont}" font-weight="600">${text}</text>`;
+};
+
 /** The gauge skeleton. Only the parts that never animate are fixed here; values arrive as styles. */
 export function phoneStatusMarkup(values) {
   const { network, battery, volume, bars, batteryColor } = values;
-  const ring = (name, path, color, percent) =>
-    `<path class="${name}-track" d="${path}" stroke="${badgeTrack}"/>` +
-    `<path class="${name}-level" d="${path}" pathLength="100" stroke-dasharray="${ringDashArray}"` +
-    ` stroke-dashoffset="${ringDash(percent)}" stroke="${color}"/>`;
+  const tickTrack = index =>
+    `<path class="volume-tick" d="${volumeTicks[index]}" stroke="${badgeTrack}"/>`;
+  const tickLevel = index =>
+    `<path class="volume-level" d="${volumeTicks[index]}" pathLength="100"` +
+    ` stroke-dasharray="${ringDashArray}" stroke-dashoffset="${tickDash(volume, index)}"` +
+    ` stroke="${badgeInk}"/>`;
   return '<svg viewBox="0 0 100 100" width="100%" height="100%" role="presentation">' +
     `<g class="rings" fill="none" stroke-width="${ringStroke}" stroke-linecap="round">` +
-    ring('battery', batteryArc, batteryColor, battery) + ring('volume', volumeArc, badgeInk, volume) + '</g>' +
+    `<path class="battery-track" d="${batteryArc}" stroke="${badgeTrack}"/>` +
+    `<path class="battery-level" d="${batteryArc}" pathLength="100" stroke-dasharray="${ringDashArray}"` +
+    ` stroke-dashoffset="${ringDash(battery)}" stroke="${batteryColor}"/>` + '</g>' +
+    `<g class="ticks" fill="none" stroke-width="${tickStroke}" stroke-linecap="round">` +
+    volumeTicks.map((_, index) => tickTrack(index)).join('') +
+    volumeTicks.map((_, index) => tickLevel(index)).join('') + '</g>' +
     `<g class="mark" data-network="${network}" transform="translate(0 ${markShift}) translate(50 50) scale(${markScale}) translate(-50 -50)"` +
     ` fill="none" stroke-width="${markKind(network) === 'wifi' ? 5 : 0}" stroke-linecap="round">` +
     markSlots[markKind(network)].map(slot => slotMarkup(slot, bars)).join('') + '</g>' +
-    `<text class="battery-number" x="50" y="20" text-anchor="middle" fill="${batteryColor}"` +
-    ` font-size="15" font-weight="600">${battery === null ? '' : battery}</text>` +
-    `<text class="volume-number" x="50" y="90" text-anchor="middle" fill="${badgeInk}"` +
-    ` font-size="15" font-weight="600">${volume === null ? '' : volume}</text></svg>`;
+    reading(battery, 'battery-number', batteryColor, batteryBaseline, batteryCollar, false) +
+    reading(volume, 'volume-number', badgeInk, volumeBaseline, volumeCollar, true) + '</svg>';
 }
 
 /**
@@ -998,16 +1054,22 @@ export function applyPhoneGauge(svg, values) {
   const { network, battery, volume, bars, batteryColor } = values;
   if (!svg) return false;
   const batteryLevel = svg.querySelector('.battery-level');
-  const volumeLevel = svg.querySelector('.volume-level');
-  if (!batteryLevel || !volumeLevel) return false;
+  const volumeTicksInDom = svg.querySelectorAll('.volume-level');
+  if (!batteryLevel || volumeTicksInDom.length !== tickCount) return false;
   batteryLevel.style.strokeDashoffset = String(ringDash(battery));
   batteryLevel.style.stroke = batteryColor;
-  volumeLevel.style.strokeDashoffset = String(ringDash(volume));
+  // Every tick carries its own offset, so the level crosses a tick boundary one tick at a time.
+  volumeTicksInDom.forEach((tick, index) => {
+    tick.style.strokeDashoffset = String(tickDash(volume, index));
+  });
   const number = svg.querySelector('.battery-number');
   if (number) {
     number.textContent = battery === null ? '' : String(battery);
     number.style.fill = batteryColor;
   }
+  // The collar belongs to the reading, so it follows the battery through red, green and ink.
+  const collar = svg.querySelector('.battery-collar');
+  if (collar) collar.style.stroke = batteryColor;
   const volumeNumber = svg.querySelector('.volume-number');
   if (volumeNumber) volumeNumber.textContent = volume === null ? '' : String(volume);
   const mark = svg.querySelector('.mark');
