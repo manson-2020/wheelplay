@@ -152,7 +152,7 @@ class DiPlayActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             val sourceId = pendingAndroidAutoSourceId ?: return@registerForActivityResult
             pendingAndroidAutoSourceId = null
-            if (!granted) toast(getString(R.string.aa_microphone_permission_denied))
+            if (!granted) toast(getString(UiR.string.aa_microphone_permission_denied))
             startProjectionSourceNow(sourceId)
         }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {

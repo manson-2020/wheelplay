@@ -107,8 +107,10 @@ internal class RemotePluginSession(
                     main.removeCallbacks(deadline)
                     notifyStatus(message.ifBlank { context.getString(UiR.string.plugin_connected) })
                     // Initial appearance can arrive before asynchronous capability discovery completes.
+                    // A plugin renders on the Android side, so follow the system theme (no browser to report one).
                     if (capabilities.nightMode) setNightMode(AirPlayPersistence.loadAppearance(context).night(
-                        context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES))
+                        context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES,
+                        browserNight = null, localDisplay = true))
                 }
                 else -> fail("Invalid plugin state")
             }
