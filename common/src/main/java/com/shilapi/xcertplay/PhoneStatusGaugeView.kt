@@ -38,7 +38,7 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
     private val density = resources.displayMetrics.density
-    // The browser draws its SVG inside a 56 px disc with a 1 px border and 2 px padding, so the
+    // The browser draws its SVG inside a 44 px disc with a 1 px border and 2 px padding, so the
     // viewBox never touches the disc edge. Both insets stay fixed in px/dp while the disc scales.
     private val discInset = (DISC_EDGE_DP + DISC_PADDING_DP) * density
 
@@ -410,8 +410,10 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         // A reading is a number with a short arc outside it: solid above the battery, dashed below the
         // volume, in the number's own colour. The collar is nudged half the difference between the two
         // neighbouring caps, so the gap on its left and right match and it reads as centred.
-        const val NUMBER_SIZE = 14f
-        const val COLLAR_RADIUS = 46.5f
+        // The disc shrinks but the readings do not: these mirror the browser's numberFont, sized so the
+        // digits keep the rendered height they had on the 56 px disc now that the disc is down to 44 px.
+        const val NUMBER_SIZE = 18f
+        const val COLLAR_RADIUS = 47f
         const val COLLAR_STROKE = 2.6f
         const val COLLAR_DEGREES = 20f
         const val COLLAR_CENTRE = 0f
@@ -419,8 +421,8 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         const val COLLAR_DASH_OFF = 2.81f
         // A step further in than the collar's edge: at 2.5 units the digits read as pressed against
         // the arc, at 3.8 they read as a reading under it.
-        const val BATTERY_BASELINE = 18.7f
-        const val VOLUME_BASELINE = 91.3f
+        const val BATTERY_BASELINE = 21.1f
+        const val VOLUME_BASELINE = 91.8f
 
         const val INK = 0xFFDFE4E8.toInt()
         const val TRACK = 0xFF8B95A1.toInt()

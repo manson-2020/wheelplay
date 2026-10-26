@@ -60,7 +60,7 @@ test('the battery keeps the ink when healthy, turns red under the threshold, gre
   // Charging is told by the colour alone: no bolt, and the number stays in the top opening.
   const markup = gauge({ network: 'wifi', bars: 2, battery: 15, volume: 40, charging: true });
   assert.doesNotMatch(markup, /battery-charging/);
-  assert.match(markup, /class="battery-number" x="50" y="18\.7"/);
+  assert.match(markup, /class="battery-number" x="50" y="21\.1"/);
 });
 
 test('each number carries its own short arc: solid above, dashed below', () => {
@@ -68,18 +68,18 @@ test('each number carries its own short arc: solid above, dashed below', () => {
   // The collars repeat the grammar of the two long arcs and take the number's own colour, while the
   // side facing the middle stays open - a number boxed in a full ring read as a stamp, not a reading.
   assert.match(tagOf(markup, 'battery-collar'),
-    /d="M34\.1 6\.3A46\.5 46\.5 0 0 1 65\.9 6\.3"[^>]*stroke="#dfe4e8" stroke-width="2\.6" stroke-linecap="round"/);
+    /d="M33\.9 5\.8A47 47 0 0 1 66\.1 5\.8"[^>]*stroke="#dfe4e8" stroke-width="2\.6" stroke-linecap="round"/);
   assert.doesNotMatch(tagOf(markup, 'battery-collar'), /dasharray/);
   assert.match(tagOf(markup, 'volume-collar'),
-    /d="M65\.9 93\.7A46\.5 46\.5 0 0 1 34\.1 93\.7"[^>]*stroke-dasharray="2\.6 2\.81"/);
+    /d="M66\.1 94\.2A47 47 0 0 1 33\.9 94\.2"[^>]*stroke-dasharray="2\.6 2\.81"/);
   // Butt ends and a gap wider than the dash: the dashed collar must not read as a solid one.
   assert.match(tagOf(markup, 'volume-collar'), /stroke-linecap="butt"/);
-  assert.match(markup, /class="battery-number" x="50" y="18\.7"/);
-  assert.match(markup, /class="volume-number" x="50" y="91\.3"/);
-  assert.match(markup, /font-size="14"/);
+  assert.match(markup, /class="battery-number" x="50" y="21\.1"/);
+  assert.match(markup, /class="volume-number" x="50" y="91\.8"/);
+  assert.match(markup, /font-size="18"/);
   // The collar never spans the opening's caps: thirty four degrees against their fifty two.
   assert.match(gauge({ network: 'wifi', bars: 3, battery: 100, volume: 100 }),
-    /class="battery-number" x="50" y="18\.7"/);
+    /class="battery-number" x="50" y="21\.1"/);
   // The collar is part of the reading, so it changes colour with it and the volume keeps the ink.
   const charging = gauge({ network: 'wifi', bars: 3, battery: 84, volume: 20, charging: true });
   assert.match(charging, /class="battery-collar"[^>]*stroke="#30d158"/);

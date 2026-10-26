@@ -134,8 +134,8 @@ class PhoneStatusGaugeViewTest {
         val bitmap = render(88, 64)
         val unit = radius / PhoneGaugeGeometry.RING_RADIUS
         // Between the collar's end and the arc's round cap the opening stays empty, top and bottom.
-        val top = brightest(bitmap, center + 18.7f * unit, center - 41.4f * unit, 1)
-        val bottom = brightest(bitmap, center + 18.7f * unit, center + 41.4f * unit, 1)
+        val top = brightest(bitmap, center + 18.7f * unit, center - 41.9f * unit, 1)
+        val bottom = brightest(bitmap, center + 18.7f * unit, center + 41.9f * unit, 1)
         assertTrue("the collar must not touch the top cap, found $top", top < 190)
         assertTrue("the collar must not touch the bottom cap, found $bottom", bottom < 190)
     }
@@ -145,7 +145,7 @@ class PhoneStatusGaugeViewTest {
         val bitmap = render(88, 64)
         val unit = radius / PhoneGaugeGeometry.RING_RADIUS
         var best = 0
-        // The number's baseline is 30 design units above the centre, 15 units tall.
+        // The number's baseline is 29 design units above the centre, 13 units tall.
         for (y in (center - 46 * unit).toInt()..(center - 18 * unit).toInt()) {
             best = max(best, brightest(bitmap, center.toFloat(), y.toFloat(), 20))
         }
@@ -172,9 +172,9 @@ class PhoneStatusGaugeViewTest {
         val bitmap = render(84, 20)
         val unit = radius / PhoneGaugeGeometry.RING_RADIUS
         // The middle of the battery collar and of the volume collar; both sit on the disc's axis.
-        val batteryCollar = brightest(bitmap, center.toFloat(), center - 46.5f * unit, 3)
+        val batteryCollar = brightest(bitmap, center.toFloat(), center - 47f * unit, 3)
         // The volume collar is dashed, so the window spans a whole dash period.
-        val volumeCollar = brightest(bitmap, center.toFloat(), center + 46.5f * unit, 5)
+        val volumeCollar = brightest(bitmap, center.toFloat(), center + 47f * unit, 5)
         assertTrue("the battery number needs its solid arc, found $batteryCollar", batteryCollar > 200)
         assertTrue("the volume number needs its dashed arc, found $volumeCollar", volumeCollar > 200)
     }

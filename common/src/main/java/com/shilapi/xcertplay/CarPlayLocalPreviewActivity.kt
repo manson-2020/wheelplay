@@ -103,11 +103,11 @@ class CarPlayLocalPreviewActivity : ComponentActivity() {
         loadingOverlay = buildLoadingOverlay().also { container.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         // The browser floats this gauge over the head-unit picture; this screen has no HTML behind the
         // TextureView, so it draws the same one itself. Added last, so the loading veil never hides it.
-        // 56 dp matches the browser disc, which stays the size of a CarPlay dock icon.
+        // 44 dp matches the browser disc, which stays the size of a CarPlay dock icon.
         if (AirPlayPersistence.loadPhoneStatusBadge(this)) {
             container.addView(
                 PhoneStatusGaugeView(this),
-                FrameLayout.LayoutParams(dp(56), dp(56), Gravity.TOP or Gravity.RIGHT).apply {
+                FrameLayout.LayoutParams(dp(44), dp(44), Gravity.TOP or Gravity.RIGHT).apply {
                     topMargin = dp(16)
                     rightMargin = dp(16)
                 },

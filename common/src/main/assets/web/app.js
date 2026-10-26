@@ -996,11 +996,13 @@ export function phoneGaugeValues(phone) {
 
 // Two bare numbers on one axis cannot be told apart - worst of all the volume, because the battery arc
 // ends right beside it. So each number gets a short arc on its outer side instead of a full ring:
-// solid above the battery, dashed below the volume.
-const numberFont = 14, collarRadius = 46.5, collarStroke = 2.6, collarDegrees = 20;
+// solid above the battery, dashed below the volume. The disc has shrunk twice (88 to 56 to 44 px) and
+// the ring, ticks and mark scale down with it, but the readings do not: the font is sized so the digits
+// keep the height they rendered at on the 56 px disc - a shrink spends the ring's slack, not the digits'.
+const numberFont = 18, collarRadius = 47, collarStroke = 2.6, collarDegrees = 20;
 // The numbers sit a step further in than the collar's edge on purpose: at 2.5 units the digits read as
 // pressed against the arc, at 3.8 they read as a reading under it.
-const batteryBaseline = 18.7, volumeBaseline = 91.3;
+const batteryBaseline = 21.1, volumeBaseline = 91.8;
 // With both runs ending on the same angle the collar can sit on the disc's axis and still leave the
 // same gap either side.
 const collarCentre = 0;
