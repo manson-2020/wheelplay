@@ -824,6 +824,9 @@ internal class LanWebServer(
                                     .put("maxTouchContacts", media.maxTouchContacts)
                                     .put("pointerInput", media.pointerInput)
                                     .put("keyboardInput", media.keyboardInput)
+                                    .put("backButton", media.backButton)
+                                    .put("sessionPhase", media.sessionPhase)
+                                    .put("sourceError", media.errorCategory ?: org.json.JSONObject.NULL)
                                     .put(
                                         "stage",
                                         if (WebSession.localDisplayActive) context.getString(UiR.string.web_displayed_on_phone)
