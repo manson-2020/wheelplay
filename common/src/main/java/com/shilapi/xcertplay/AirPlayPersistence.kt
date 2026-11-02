@@ -38,6 +38,7 @@ object AirPlayPersistence {
     private const val KEY_UI_SCALE_PERCENT = "ui_scale_percent"
     private const val KEY_HEVC_ENABLED = "hevc_enabled"
     private const val KEY_BLUETOOTH_AUDIO_PRIORITY = "bluetooth_audio_priority"
+    private const val KEY_BROWSER_HEVC = "browser_hevc"
     private const val KEY_HEVC_SOFTWARE_DECODER = "hevc_software_decoder"
     private const val KEY_ADVANCED_AUDIO_CHANNEL_MAPPING = "advanced_audio_channel_mapping"
     private const val KEY_WIRELESS_ENABLED = "wireless_enabled"
@@ -253,6 +254,24 @@ object AirPlayPersistence {
     fun saveBluetoothAudioPriority(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_BLUETOOTH_AUDIO_PRIORITY, enabled)
+            .apply()
+    }
+
+    /**
+     * Whether the browser that last opened the page can decode HEVC with WebCodecs. Only the page
+     * can answer that (`VideoDecoder.isConfigSupported` is SecureContext-gated and per browser
+     * build), so it reports the answer on `vcs-start` and this phone remembers it before it
+     * advertises HEVC to the iPhone: an H.264-only head unit must never be sent a stream it cannot
+     * decode, because the codec stream is then the only transport left and the picture would drop
+     * to JPEG. Defaults to false - the safe direction.
+     */
+    fun loadBrowserHevc(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_BROWSER_HEVC, false)
+
+    fun saveBrowserHevc(context: Context, supported: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_BROWSER_HEVC, supported)
             .apply()
     }
 

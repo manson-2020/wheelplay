@@ -24,16 +24,20 @@
 
 ### 压缩视频串流（WebCodecs）
 
-服务端把 iPhone 的 H.264 访问单元（Annex B，关键帧前置 SPS/PPS）按 `WCV1` 头（magic、序号、
-微秒时间戳、关键帧标志、参数集长度）经同一个 WebSocket 下发，上限 6 帧 / 2 MiB，
-满仓只丢最新帧并请求关键帧，参考链因此不会断裂；这与 WebRTC 发送队列同一套边界。网页用
+服务端把 iPhone 的 H.264／HEVC 访问单元（Annex B，关键帧前置参数集：H.264 为 SPS/PPS，HEVC 为
+VPS/SPS/PPS）按 `WCV1` 头（magic、序号、微秒时间戳、关键帧标志、参数集长度）经同一个 WebSocket 下发，
+上限 6 帧 / 2 MiB，满仓只丢最新帧并请求关键帧，参考链因此不会断裂；这与 WebRTC 发送队列同一套边界。网页用
 `VideoDecoder` 解码后直接绘制到画布，序号出现缺口时先 `reset()` 再等关键帧。信令为 `vcs-start` /
 `vcs-ready` / `vcs-feedback`（每秒一次已解码帧数）/ `vcs-keyframe` / `vcs-fallback`，卡顿容忍、
-有界退避重试与关键帧恢复沿用 WebRTC 的策略；`?diag=1` 状态行显示 `H.264 / WS`。
+有界退避重试与关键帧恢复沿用 WebRTC 的策略；`?diag=1` 状态行显示 `H.264 / WS` 或 `HEVC / WS`。
 
-只支持 H.264：HEVC 的 WebCodecs 能力无法从 SDP 侧参数判断，服务端直接标记 `vcs-hevc-unsupported`
-并保持图片串流。浏览器没有 `VideoDecoder`、判定不支持该 profile 或解码启动失败时上报
-`codec-unsupported`（不再重试），画面回到 JPEG／WebP，与旧行为一致。
+编解码由浏览器决定，因为只有页面知道自己的 WebCodecs 能解什么：页面在 `vcs-start` 里带上探测到的 HEVC
+codec 串（`hvc1.…`，探测不到就带空串），服务端把这次答案记进 `browser_hevc`，下一次 iPhone 建立会话时才
+据此协商 HEVC；没有这条证据（或页面报空串）就继续要 H.264，避免车机收到解不了的流而退回 JPEG。HEVC 的
+解码配置串由服务端按 HEVC 配置记录生成（`hvc1.<profile_idc>.<compatibility>.<tier><level>.<constraints>`），
+页面在它和探测用的几组串之间取第一个 `isConfigSupported` 通过的。`?diag=1` 的 `cap` 行显示
+`hevc=?/1:hvc1/1:hev1/0`（未探测完／接受哪种 sample entry／解不了）。浏览器没有 `VideoDecoder`、没有一串
+通过或解码启动失败时上报 `codec-unsupported`（不再重试），画面回到 JPEG／WebP，与旧行为一致。
 
 ### 定位实验开关 `?rtcexp=`
 

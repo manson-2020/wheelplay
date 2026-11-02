@@ -2633,7 +2633,7 @@ class CarPlayHostActivity : ComponentActivity() {
             sourceVersion = "950.7.1",
             main = display,
             rightHandDrive = rightHandDrive,
-            hevc = hevcEnabled,
+            hevc = hevcEnabled && !codecStreamNeedsAvc(),
             microphone = AirPlayPersistence.loadMicrophoneSource(this) != CarPlayMicrophoneSource.DISABLED,
             microphoneOpus = com.shilapi.xcertplay.media.OpusEncoderSupport.isAvailable(),
             manufacturer = normalizedManufacturer(),
@@ -2801,6 +2801,16 @@ class CarPlayHostActivity : ComponentActivity() {
      * own fallback when the browser cannot decode.
      */
     private fun effectiveStreamTechnology(): com.shilapi.xcertplay.web.StreamTechnology = streamTechnology
+
+    // "Bluetooth audio priority" routes the browser to the WebSocket codec stream. That stream can
+    // carry HEVC, but only when the browser decodes it: the page reports its own WebCodecs support
+    // when it starts the stream and this phone remembers the answer. Until a browser has proved it
+    // (or when the one that did was a laptop rather than this head unit) the iPhone is asked for
+    // H.264, because a stream the car cannot decode would block the low-latency path entirely.
+    private fun codecStreamNeedsAvc(): Boolean =
+        AirPlayPersistence.loadBluetoothAudioPriority(this) &&
+            !AirPlayPersistence.loadBrowserAudioPlayback(this) &&
+            !AirPlayPersistence.loadBrowserHevc(this)
 
     private fun createMediaSink(
         videoWidth: Int,

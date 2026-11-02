@@ -14,7 +14,15 @@ internal class WebVideoSource(val technology: StreamTechnology) : EncodedVideoSi
     @Volatile private var processor = "JVM"
     fun performanceSnapshot() = performance.snapshot() + ("processor" to processor)
     private var lastPts: Long? = null
-    class Config(val type: Int, val codec: VideoCodec, val profile: String, val parameters: ByteArray) {
+    class Config(
+        val type: Int,
+        val codec: VideoCodec,
+        val profile: String,
+        val parameters: ByteArray,
+        // The RFC 6381 string WebCodecs wants in `VideoDecoder.configure`. H.264 derives it from the
+        // profile-level-id; HEVC builds it from the same configuration record the level came from.
+        val webCodecs: String = if (codec == VideoCodec.H264) "avc1.$profile" else "",
+    ) {
         val fmtp get() = if (codec == VideoCodec.H264)
             "profile-level-id=$profile;packetization-mode=1;level-asymmetry-allowed=1" else profile
     }
@@ -79,7 +87,23 @@ internal class WebVideoSource(val technology: StreamTechnology) : EncodedVideoSi
         }
         if (!found.containsAll(listOf(32, 33, 34))) return null
         val fmtp = "profile-id=${profileByte and 31};tier-flag=${(profileByte ushr 5) and 1};level-id=$level;tx-mode=SRST"
-        return Config(type, VideoCodec.H265, fmtp, parameters)
+        return Config(type, VideoCodec.H265, fmtp, parameters, hevcCodecString(data, profileByte, level))
+    }
+
+    /**
+     * `hvc1.<profile_idc>.<compatibility flags>.<tier><level_idc>.<constraint flags>`, the string
+     * WebCodecs matches against - the same shape a page can probe with. The constraint flags are six
+     * bytes with trailing zeros dropped, which is why the usual HEVC string ends in `.B0`
+     * (progressive source, no interlace, no 4:4:4).
+     */
+    private fun hevcCodecString(data: ByteArray, profileByte: Int, level: Int): String {
+        val compatibility = ((data[2].toInt() and 255) shl 24) or ((data[3].toInt() and 255) shl 16) or
+            ((data[4].toInt() and 255) shl 8) or (data[5].toInt() and 255)
+        val constraints = (6..11).map { data[it].toInt() and 255 }.dropLastWhile { it == 0 }
+            .joinToString("") { "%02X".format(it) }
+        val tier = if (profileByte and 0x20 != 0) "H" else "L"
+        return "hvc1.${profileByte and 31}.${compatibility.toString(16).uppercase()}.$tier$level" +
+            (if (constraints.isEmpty()) "" else ".$constraints")
     }
 
     @Synchronized fun attach(stream: VideoFrameStream, expected: Config): Boolean {

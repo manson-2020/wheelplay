@@ -512,6 +512,10 @@ internal class LanWebServer(
                     stopVcs()
                     rtcSource = source
                     rtcConfig = source?.config
+                    // The codec stream owns the same compressed source as WebRTC; without this the
+                    // `vcsSource === media.source` gate below never passes and VCS stays dead, so
+                    // Bluetooth audio priority could only ever fall back to JPEG.
+                    vcsSource = source
                     vcsConfig = source?.config
                     rtcRetry.reset()
                     vcsRetry.reset()
@@ -627,20 +631,38 @@ internal class LanWebServer(
                 sender.frameAvailable()
             }
 
-        private fun startVcs() {
+        // The iPhone picks the codec when it sets the stream up, before any page has loaded, so the
+        // answer has to outlive the session; a change is written immediately and read by the next
+        // setup (codecStreamOnly). Cheap enough to re-check on every request, and it keeps the
+        // preference honest if the head unit browser is replaced by one that cannot decode HEVC.
+        private fun rememberBrowserHevc(supported: Boolean) {
+            if (AirPlayPersistence.loadBrowserHevc(context) == supported) return
+            AirPlayPersistence.saveBrowserHevc(context, supported)
+            Log.i("WheelPlayWeb", "browser-hevc supported=$supported t=${SystemClock.elapsedRealtime()}")
+        }
+
+        /**
+         * @param browserHevc the codec string the page's own `VideoDecoder` accepted, an empty string
+         *   when it decodes no HEVC at all, or null for a page that predates the report. Only the
+         *   browser knows this, and the H.265 branch below exists because it has to say so before
+         *   this phone can let an HEVC stream through.
+         */
+        private fun startVcs(browserHevc: String? = null) {
             // Same monitor discipline as startRtc: never take the WebSession lock inside rtcLock.
             val media = WebSession.mediaSnapshot()
             synchronized(rtcLock) {
                 reconcileVideo()
+                if (browserHevc != null) rememberBrowserHevc(browserHevc.isNotEmpty())
                 if (vcs != null || !vcsRetry.available || ended.get() || !WebSession.videoActive) return
                 if (rtc != null) return // One consumer per compressed source.
                 if (!codecStreamPreferred) return
                 val source = vcsSource ?: return
                 val config = vcsConfig ?: return
                 if (media.source !== source || media.sourceState == "stopped") return
-                if (config.codec == VideoCodec.H265) {
-                    // The browser's WebCodecs HEVC support is unverifiable from the profile alone;
-                    // H.264 stays the codec stream's contract and JPEG remains the fallback.
+                if (config.codec == VideoCodec.H265 && browserHevc.isNullOrEmpty()) {
+                    // Nothing on the page can decode HEVC, so an HEVC codec stream would only feed a
+                    // decoder that rejects it; JPEG stays the fallback until the iPhone is asked for
+                    // H.264 again (see codecStreamOnly in the host activity).
                     vcsHint = "vcs-hevc-unsupported"
                     vcsRetry.block()
                     return
@@ -677,6 +699,7 @@ internal class LanWebServer(
                         .put("videoEpoch", media.videoEpoch)
                         .put("codec", config.codec.name)
                         .put("profile", config.profile)
+                        .put("webcodecs", config.webCodecs)
                         .put("recoveryGraceMs", recovery.graceMs)
                         .toString(),
                 )
@@ -1073,7 +1096,9 @@ internal class LanWebServer(
                         Log.i("WheelPlayWeb", "media $echo t=${SystemClock.elapsedRealtime()}")
                     }
                     "rtc-start" -> startRtc()
-                    "vcs-start" -> startVcs()
+                    "vcs-start" -> startVcs(
+                        if (data.has("hevc")) data.optString("hevc").take(64) else null,
+                    )
                     "vcs-ready" ->
                         synchronized(rtcLock) {
                             if (data.getLong("id") == vcsId) vcs?.displayed()

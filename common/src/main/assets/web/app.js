@@ -168,6 +168,29 @@ export function probeWebp({ createImage = () => new Image(), schedule = setTimeo
   });
 }
 
+// HEVC support belongs to the browser build, not to the stream, and a head unit has no console:
+// probe it once so `?diag=1` can report `hevc=1/0` next to the H.264-only codec stream. Three
+// strings, because a decoder may take the hvc1 sample entry but not hev1 - or only the lower level;
+// the first that answers true is the one a codec stream could later be configured with. Resolves to
+// that string, or null when HEVC is unreachable here.
+export const HEVC_CODEC_STRINGS = ['hvc1.1.6.L93.B0', 'hvc1.1.6.L123.B0', 'hev1.1.6.L93.B0'];
+export function probeHevc({ decoder = typeof VideoDecoder === 'undefined' ? null : VideoDecoder,
+  candidates = HEVC_CODEC_STRINGS } = {}) {
+  if (!decoder || typeof decoder.isConfigSupported !== 'function') return Promise.resolve(null);
+  const attempt = index => {
+    if (index >= candidates.length) return null;
+    const codec = candidates[index];
+    let request;
+    // A malformed string throws instead of rejecting, so the fallback covers both.
+    try { request = decoder.isConfigSupported({ codec, optimizeForLatency: true }); }
+    catch (_) { return null; }
+    return Promise.resolve(request)
+      .then(result => result?.supported === true ? codec : attempt(index + 1))
+      .catch(() => attempt(index + 1));
+  };
+  return Promise.resolve(attempt(0));
+}
+
 // At most two decodes plus the displayed frame. Newer commits retire older work.
 export function createJpegPresenter(images, { onFrame, onError = () => {},
   createUrl = data => URL.createObjectURL(data), revokeUrl = url => URL.revokeObjectURL(url),
@@ -894,10 +917,12 @@ export function createRtcReceiver(createRenderer, {
 // follows the peer connection itself, not any audio the page plays, so this path keeps Bluetooth
 // and the wheel keys while still decoding the iPhone's own H.264 instead of JPEG images.
 export const CODEC_STREAM_MAGIC = 0x31564357; // WCV1, matches CodecPacket.MAGIC
+const HEADER_BYTES = 24; // magic + sequence + pts + flags + parameter length
 export function createCodecReceiver(drawFrame, {
   send, onReady = () => {}, onStop = () => {}, onStats = () => {}, onReset = () => {},
   supportsCodec = config => typeof VideoDecoder === 'undefined' ? Promise.resolve(false)
-    : VideoDecoder.isConfigSupported(config).then(result => result?.supported === true),
+    : VideoDecoder.isConfigSupported(config).then(result => result?.supported === true)
+      .catch(() => false),
   schedule = setTimeout, cancel = clearTimeout, now = () => Date.now(),
 } = {}) {
   let decoder = null, id = null, generation = 0, ready = false, codec = 'H264', keySeen = false;
@@ -930,9 +955,14 @@ export function createCodecReceiver(drawFrame, {
     recoveryGraceMs = [4000, 10000, 30000].includes(message.recoveryGraceMs) ? message.recoveryGraceMs : 10000;
     const token = generation;
     if (typeof VideoDecoder === 'undefined') { fallback('codec-unsupported', false); return; }
-    // H.264 arrives as an Annex B byte stream, so no decoder description is configured; the
-    // parameter sets ride inside the keyframe access units instead.
-    config = { codec: `avc1.${message.profile}`, optimizeForLatency: true };
+    // H.264 and HEVC both arrive as Annex B byte streams, so no decoder description is configured;
+    // the parameter sets (SPS/PPS, or VPS/SPS/PPS) ride inside the keyframe access units instead.
+    // The service names the exact HEVC level it negotiated; the probed strings cover a page whose
+    // service is older, or a level this decoder refuses but a nearby one it accepts.
+    const candidates = message.codec === 'H265'
+      ? [...new Set([message.webcodecs, ...HEVC_CODEC_STRINGS].filter(Boolean))]
+      : [`avc1.${message.profile}`];
+    config = null;
     keySeen = false; lastSequence = null; fpsPrevious = null;
     timeout = schedule(() => { if (generation === token) fallback('first-frame-timeout'); }, Math.max(10000, recoveryGraceMs));
     const displayed = size => {
@@ -959,26 +989,36 @@ export function createCodecReceiver(drawFrame, {
       if (stalledSince !== null && at - stalledSince >= recoveryGraceMs) { fallback('decode-stall'); return; }
       if (current()) statsTimer = schedule(sample, 1000);
     };
-    supportsCodec(config).then(ok => {
+    // First accepted configuration wins; a decoder that takes hvc1 may refuse hev1 and vice versa.
+    const accept = list => list.reduce((found, codecString) => found.then(hit => hit
+      ? hit
+      : supportsCodec({ codec: codecString, optimizeForLatency: true }).then(ok => ok ? codecString : null)),
+    Promise.resolve(null));
+    accept(candidates).then(codecString => {
       if (generation !== token) return;
-      if (!ok) { fallback('codec-unsupported', false); return; }
+      probe('support', `${codecString ?? candidates[0]}=${codecString !== null}`);
+      if (codecString === null) { fallback('codec-unsupported', false); return; }
+      config = { codec: codecString, optimizeForLatency: true };
       try {
         decoder = new VideoDecoder({
           output: frame => {
             decoded++;
+            if (decoded === 1) probe('first-output', `${frame.displayWidth}x${frame.displayHeight}`);
             const size = { width: frame.displayWidth, height: frame.displayHeight };
             try { drawFrame(frame); } finally { frame.close(); }
             displayed(size);
           },
-          error: () => { if (current()) fallback('decode-error'); },
+          error: err => { probe('decoder-error', `${err && err.name}:${err && err.message}`); if (current()) fallback('decode-error'); },
         });
         decoder.__token = token;
         decoder.configure(config);
       } catch (_) { fallback('codec-unsupported', false); }
     });
   }
+  // Head units have no reachable console, so the ?diag=1 panel shows the last receiver stage.
+  const probe = (stage, detail = '') => { globalThis.__vcsStage = `${stage}${detail ? ':' + detail : ''}`; };
   function feed(buffer) {
-    if (!decoder || decoder.state !== 'configured') return;
+    if (!decoder || decoder.state !== 'configured') { probe('feed-skip', decoder ? decoder.state : 'null'); return; }
     const view = new DataView(buffer);
     const keyframe = view.getUint16(20, true) === 1;
     const sequence = Number(view.getBigInt64(4, true));
@@ -987,13 +1027,14 @@ export function createCodecReceiver(drawFrame, {
     if (!keyframe && !keySeen) return;
     lastSequence = sequence;
     if (keyframe && !keySeen) { keySeen = true; try { decoder.reset(); decoder.configure(config); } catch (_) { return; } }
+    if (lastSequence === 0) probe('first-au', `key=${keyframe} bytes=${buffer.byteLength} skip=${view.getUint16(22, true)}`);
     try {
       decoder.decode(new EncodedVideoChunk({
         type: keyframe ? 'key' : 'delta',
         timestamp: Number(view.getBigInt64(12, true)),
-        data: new Uint8Array(buffer, 24 + view.getUint16(22, true)),
+        data: new Uint8Array(buffer, HEADER_BYTES),
       }));
-    } catch (_) {}
+    } catch (error) { probe('decode-throw', `${error && error.name}:${error && error.message}`); }
   }
   return { receive, feed, close, get active() { return ready; }, get codec() { return codec; },
     get lastReason() { return lastReason; },
@@ -1260,11 +1301,21 @@ if (typeof document !== 'undefined') {
   const rendererStats = { selectedMode: 'native', activeMode: 'waiting', renderedFps: null, renderedFrames: null, fallbackReason: null };
   const performanceStats = { source: null, transport: null, receiver: null, image: null, presentation: rendererStats };
   const webpSupport = probeWebp();
+  // `undefined` until the HEVC probe settles, `null` when this browser cannot decode it at all.
+  let hevcCodec;
+  // Awaited before the codec stream is requested: the service will not start an HEVC stream this
+  // page never said it could decode, and the iPhone may already be sending one.
+  const hevcProbe = probeHevc().then(codec => {
+    hevcCodec = codec;
+    // The panel only repaints on a media snapshot; a head unit sitting on JPEG may not send one.
+    if (diagnosticStatus) renderPresentation(presentation.current);
+    return codec;
+  });
   Object.defineProperty(window, 'wheelplayStats', { configurable: true, get: () => JSON.parse(JSON.stringify(performanceStats)) });
   let rtc = null, rtcRequested = false, rtcFps = null;
   let codec = null, codecRequested = false, codecFps = null;
   // Latest server-side WebRTC hint and capability snapshot, kept for the ?diag=1 status line.
-  let serverRtcHint = '', serverRtcDiag = '';
+  let serverRtcHint = '', serverVcsHint = '', serverRtcDiag = '';
   let serverMedia = null;
   let socket = null, stopped = true, paired = false, retry = null, attempts = 0;
   let width = 1280, height = 720, live = false, lastStatus = 0, rtcMedia = {}, codecMedia = {};
@@ -1632,10 +1683,27 @@ if (typeof document !== 'undefined') {
     const rtcReason = rtc?.lastReason || serverRtcHint;
     const diagnostic = diagnosticStatus ? ` · WebRTC: ${rtcReason || (rtc?.active ? 'ok' : 'idle')}` : '';
     const image = performanceStats.image;
+    // Only the path that is painting the picture owns this line. A live video transport leaves the
+    // still-image encoder idle, so reporting its 0 fps beside a smooth picture reads as a stall -
+    // and on a head unit this box is the only instrument the driver can look at.
+    const sourceFps = performanceStats.source?.fps?.input;
+    const sourceSuffix = typeof sourceFps === 'number' ? ` · src ${Math.round(sourceFps)} fps` : '';
+    const videoDetail = codecVisible
+      ? `ws dec ${codecFps ?? 0} fps${sourceSuffix}`
+      : rtcVisible ? `rtc dec ${rtcFps ?? 0} fps${sourceSuffix}` : '';
     // Still-image throughput is encode-bound when enc stays below tx; ACK latency covers send, decode and return.
-    const imageDetail = image?.format
+    const imageDetail = !videoDetail && image?.format
       ? `img enc ${image.encodedFps ?? 0} fps · tx ${image.sentFps ?? 0} fps · ack ${Math.round(image.lastAckMs || 0)} ms` : '';
-    const detail = [serverRtcDiag, imageDetail, mediaSessionMode
+    // WebCodecs is SecureContext-gated: a plain-http head unit page has no VideoDecoder at all,
+    // so the codec stream can never start there and the picture stays on JPEG. Report the raw
+    // capability and the server's refusal reason side by side instead of guessing. `hevc` answers a
+    // separate question - whether this browser could decode the phone's HEVC at all - so `?` until
+    // the probe settles, then 1 with the sample entry it accepted, or 0.
+    const hevcState = hevcCodec === undefined ? '?' : hevcCodec ? `1:${hevcCodec.slice(0, 4)}` : 0;
+    const capabilityDetail = `cap secure=${window.isSecureContext ? 1 : 0} vd=${typeof VideoDecoder === 'function' ? 1 : 0}` +
+      ` hevc=${hevcState}` +
+      (serverVcsHint ? ` vcs=${serverVcsHint}` : '') + ` cs=${globalThis.__vcsStage || '-'}`;
+    const detail = [serverRtcDiag, videoDetail || imageDetail, capabilityDetail, mediaSessionMode
       // The probe line is the evidence for whether the head unit delivers wheel keys at all.
       ? `ms=${mediaSessionMode} api=${mediaProbe?.available ? 1 : 0}` +
         ` key=${lastKeyCode || 'none'}` +
@@ -1958,6 +2026,7 @@ if (typeof document !== 'undefined') {
         }
         if (data.type === 'status') {
           serverRtcHint = data.rtcHint || '';
+          serverVcsHint = data.vcsHint || '';
           serverRtcDiag = data.rtcDiag || '';
           if (data.media) { serverMedia = data.media; mediaProbe?.apply(data.media); }
           // The phone's own battery and radio stay current even while no video is flowing, so the
@@ -1985,7 +2054,11 @@ if (typeof document !== 'undefined') {
           rtc.progress(data.rtcFrames || 0);
           codec.progress(data.vcsFrames || 0);
           if (data.vcsAvailable && !codecRequested && !codec.active && typeof VideoDecoder !== 'undefined') {
-            codecRequested = true; send({ type: 'vcs-start' });
+            codecRequested = true;
+            // Report what this browser can decode with the request: it is the only side that knows,
+            // and the service has to decide before it sends the first access unit. The probe has
+            // usually settled already; waiting costs nothing when it has not.
+            hevcProbe.then(() => { if (codecRequested) send({ type: 'vcs-start', hevc: hevcCodec || '' }); });
           }
           if (!data.vcsAvailable) codecRequested = false;
           if (data.rtcAvailable && !rtcRequested && !rtc.active && typeof RTCPeerConnection !== 'undefined' &&
