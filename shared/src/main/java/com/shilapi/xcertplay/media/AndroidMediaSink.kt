@@ -770,6 +770,13 @@ private class AudioRenderer(
     private var underrunsAtPlaybackStart = 0
     private var lastPcmWriteNs = 0L
     private var rebufferCount = 0
+    // Failsafe for video playback: CarPlay now-playing state only tracks audio apps, so a playing
+    // video app never publishes PLAYING and the focus gate stays closed - decoded PCM would be
+    // dropped forever while the phone keeps streaming. Sustained real PCM is treated as proof of
+    // playback: after a short grace period of denied writes the gate reopens locally.
+    // Telephony/navigation renderers bypass the gate already, so only media streams hit this.
+    @Volatile private var deniedPcmSinceNs = 0L
+    @Volatile private var focusFailsafe = false
     private val thread = Thread(::run, "carplay-audio").apply { isDaemon = true }
 
     fun start() {
@@ -821,7 +828,7 @@ private class AudioRenderer(
                 // Output becomes ready asynchronously, including after the last packet of a burst.
                 // Waiting for the next UDP packet can strand decoded sound for hundreds of ms.
                 codec?.let(::drainCodec)
-                if (!remotePlayback && !localAllowed()) pauseLocal()
+                if (!remotePlayback && !gateOpen(0)) pauseLocal()
                 else maintainPlaybackBuffer()
                 logStatsIfDue()
             }
@@ -1107,6 +1114,29 @@ private class AudioRenderer(
         }
     }
 
+    /** Permission check plus the video failsafe: only actual PCM can request focus, and real PCM
+     *  that stays denied past the grace window reopens the gate locally. Idle maintenance passes
+     *  length=0 and remains a pure permission check. */
+    private fun gateOpen(length: Int): Boolean {
+        if (localAllowed()) {
+            deniedPcmSinceNs = 0L
+            focusFailsafe = false
+            return true
+        }
+        if (focusFailsafe) return true
+        if (length <= 0) return false
+        val now = System.nanoTime()
+        if (deniedPcmSinceNs == 0L) deniedPcmSinceNs = now
+        localRequested()
+        if (now - deniedPcmSinceNs >= FOCUS_FAILSAFE_GRACE_NS) {
+            focusFailsafe = true
+            val waitedMs = (now - deniedPcmSinceNs) / 1_000_000L
+            Log.i(TAG, "audio focus fail-safe engaged type=${format.payloadType} waitedMs=$waitedMs")
+            report("Audio: focus fail-safe engaged audioType=${format.audioType} waitedMs=$waitedMs")
+        }
+        return focusFailsafe
+    }
+
     private fun writePcm(data: ByteArray, offset: Int = 0, length: Int = data.size) {
         if (remoteOutput(data, offset, length)) {
             if (!remotePlayback) {
@@ -1118,10 +1148,7 @@ private class AudioRenderer(
             return
         }
         remotePlayback = false
-        if (!localAllowed()) {
-            // Only actual PCM can request focus. Idle maintenance remains a pure permission
-            // check; denied/paused output keeps one outstanding demand until permission returns.
-            if (length > 0) localRequested()
+        if (!gateOpen(length)) {
             pauseLocal()
             return
         }
@@ -1288,5 +1315,8 @@ private class AudioRenderer(
         const val STATS_TAG = "DiPlay-AudioStats"
         const val STATS_WINDOW_NS = 5_000_000_000L
         const val DECODED_BUFFER_LOG_INTERVAL = 50
+        // How long decoded media PCM may stay focus-blocked before the failsafe reopens the gate.
+        const val FOCUS_FAILSAFE_GRACE_MS = 500L
+        val FOCUS_FAILSAFE_GRACE_NS = TimeUnit.MILLISECONDS.toNanos(FOCUS_FAILSAFE_GRACE_MS)
     }
 }

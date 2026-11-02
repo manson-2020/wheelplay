@@ -93,4 +93,48 @@ class AndroidMediaSinkFocusDemandTest {
             assertNull(requested.poll(150, TimeUnit.MILLISECONDS))
         } finally { sink.close() }
     }
+
+    private fun pumpUntil(sink: AndroidMediaSink, condition: () -> Boolean) {
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (!condition()) {
+            pcm(sink)
+            Thread.sleep(10)
+            assertTrue("Condition must become true while PCM stays focus-denied", System.nanoTime() < deadline)
+        }
+    }
+
+    @Test fun sustainedDeniedMediaPcmEngagesFocusFailSafe() {
+        // A playing video app never publishes PLAYING on the CarPlay now-playing session, so focus
+        // is never granted. Sustained decoded PCM must still reach the local track after the
+        // grace window instead of being dropped forever.
+        val engagements = AtomicInteger()
+        val requested = AtomicInteger()
+        val sink = AndroidMediaSink(
+            onAudioDiagnostic = { if (it.startsWith("Audio: focus fail-safe")) engagements.incrementAndGet() })
+        sink.setLocalMediaRequestedListener { requested.incrementAndGet() }
+        try {
+            sink.onAudioStarted(1, format, 0)
+            pumpUntil(sink) { engagements.get() >= 1 }
+            assertTrue("Fail-safe must fire the focus demand first", requested.get() > 0)
+        } finally { sink.close() }
+    }
+
+    @Test fun grantedPermissionResetsFailSafeState() {
+        val engagements = AtomicInteger()
+        val sink = AndroidMediaSink(
+            onAudioDiagnostic = { if (it.startsWith("Audio: focus fail-safe")) engagements.incrementAndGet() })
+        sink.setLocalMediaRequestedListener { }
+        try {
+            sink.onAudioStarted(1, format, 0)
+            pumpUntil(sink) { engagements.get() >= 1 }
+            // Permission returning must clear the failsafe: a later focus loss restarts the
+            // grace window instead of playing through immediately. Give the renderer loop a beat
+            // to observe the granted permission before revoking it again.
+            sink.setLocalMediaAllowed(true)
+            pcm(sink)
+            Thread.sleep(200)
+            sink.setLocalMediaAllowed(false)
+            pumpUntil(sink) { engagements.get() >= 2 }
+        } finally { sink.close() }
+    }
 }
