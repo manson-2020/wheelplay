@@ -32,6 +32,13 @@ internal fun AudioSettingsScreen(state: SettingsState, actions: SettingsActions)
     SettingsToggle(
         state,
         actions,
+        ToggleSetting.BROWSER_MEDIA,
+        R.string.settings_browser_media,
+        R.string.settings_browser_media_description,
+    )
+    SettingsToggle(
+        state,
+        actions,
         ToggleSetting.BLUETOOTH_AUDIO,
         R.string.settings_bluetooth_audio,
         R.string.settings_bluetooth_audio_description,

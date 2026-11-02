@@ -289,6 +289,7 @@ internal object WebSession {
             capabilities?.browserMicrophone == true && source == CarPlayMicrophoneSource.BROWSER,
             AirPlayPersistence.loadMediaBufferMillis(context),
             capabilities?.microphone == true && source != CarPlayMicrophoneSource.DISABLED,
+            AirPlayPersistence.loadBrowserMediaToPage(context),
         )
     }
 
@@ -730,6 +731,13 @@ internal object WebSession {
     @Synchronized
     fun setBrowserAudioPlayback(context: Context, enabled: Boolean) {
         AirPlayPersistence.saveBrowserAudioPlayback(context, enabled)
+        configureAudio(context)
+    }
+
+    /** Live switch: the page keeps its prompts, and media returns to this phone without a reconnect. */
+    @Synchronized
+    fun setBrowserMediaToPage(context: Context, enabled: Boolean) {
+        AirPlayPersistence.saveBrowserMediaToPage(context, enabled)
         configureAudio(context)
     }
 

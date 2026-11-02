@@ -50,6 +50,7 @@ internal enum class ToggleSetting {
     PHONE_STATUS_BADGE,
     HEVC,
     BLUETOOTH_AUDIO,
+    BROWSER_MEDIA,
     RIGHT_HAND,
     HTTPS,
     TESLA,

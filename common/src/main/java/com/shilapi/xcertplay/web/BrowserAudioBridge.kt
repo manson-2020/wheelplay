@@ -23,6 +23,9 @@ internal class BrowserAudioBridge {
     private var requestedCapture = false
     private var microphoneEnabled = true
     private var mediaBufferMillis = MediaAudioBuffer.DEFAULT_MILLIS
+    // False is the split of docs/BROWSER_AUDIO.md: the page gets prompts and navigation only, while
+    // music, calls and Siri stay on this phone, so a head unit does not lose the phone's Bluetooth.
+    private var mediaToBrowser = true
     private var playback = false
     private var capture = false
     private var sequence = 0L
@@ -39,13 +42,18 @@ internal class BrowserAudioBridge {
     }
 
     fun configure(playback: Boolean, capture: Boolean, mediaBufferMillis: Int = MediaAudioBuffer.DEFAULT_MILLIS,
-        microphoneEnabled: Boolean = true) {
+        microphoneEnabled: Boolean = true, mediaToBrowser: Boolean = true) {
         val change = synchronized(lock) {
             val enabledChanged = this.microphoneEnabled != microphoneEnabled
+            val splitChanged = this.mediaToBrowser != mediaToBrowser
             this.microphoneEnabled = microphoneEnabled
+            this.mediaToBrowser = mediaToBrowser
             requestedPlayback = playback; requestedCapture = capture && microphoneEnabled
             this.mediaBufferMillis = MediaAudioBuffer.sanitize(mediaBufferMillis)
             sendRoute()
+            // Turning the split on must also retract a media route the phone has already been told
+            // about, or Android audio focus stays abandoned and the music played here would be silent.
+            if (splitChanged && !mediaToBrowser) route?.resetPlayback()
             this.playback = this.playback && playback
             val nextCapture = this.capture && requestedCapture
             val changed = this.capture != nextCapture || enabledChanged
@@ -136,6 +144,9 @@ internal class BrowserAudioBridge {
         override fun output(type: Int, format: AudioFormat, pcm: ByteArray, offset: Int, length: Int): Boolean {
             val outgoing = synchronized(lock) {
                 if (closed || route !== this || !playback || send == null) return false
+                // Refusing here is what publishes the media route as local: the caller then plays the
+                // stream on this phone instead of dropping it.
+                if (!mediaToBrowser && format.isMediaPlayback()) return false
                 if (format.channels !in 1..2 || format.sampleRate !in 8_000..96_000 ||
                     length <= 0 || length % (format.channels * 2) != 0) return false
                 val seq = ++sequence

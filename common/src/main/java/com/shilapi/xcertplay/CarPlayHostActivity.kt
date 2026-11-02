@@ -2795,16 +2795,12 @@ class CarPlayHostActivity : ComponentActivity() {
         model.trim().ifBlank { AirPlayPersistence.DEFAULT_MODEL }
 
     /**
-     * Some head units terminate the phone's A2DP link as soon as the browser plays media, which
-     * costs both Bluetooth audio and the steering wheel keys. When the user keeps audio on Android
-     * and asks for Bluetooth priority, stay on the image transport that does not claim media.
+     * Bluetooth priority no longer downgrades the image transport: the web server then offers the
+     * WebSocket codec stream instead of WebRTC (the conflict in docs/BROWSER_AUDIO.md follows the
+     * WebRTC media transport itself, not any audio the page plays), and JPEG remains the stream's
+     * own fallback when the browser cannot decode.
      */
-    private fun effectiveStreamTechnology(): com.shilapi.xcertplay.web.StreamTechnology =
-        if (streamTechnology == com.shilapi.xcertplay.web.StreamTechnology.WEBRTC &&
-            AirPlayPersistence.loadBluetoothAudioPriority(this) &&
-            !AirPlayPersistence.loadBrowserAudioPlayback(this)
-        ) com.shilapi.xcertplay.web.StreamTechnology.JPEG
-        else streamTechnology
+    private fun effectiveStreamTechnology(): com.shilapi.xcertplay.web.StreamTechnology = streamTechnology
 
     private fun createMediaSink(
         videoWidth: Int,

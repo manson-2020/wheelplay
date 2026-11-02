@@ -461,6 +461,19 @@ internal class LanWebServer(
         private val rtcRetry = RtcRetryPolicy()
         private var rtcId = 0L
         private var rtcAnswered = false
+        // The WebSocket codec stream replaces WebRTC for head units whose browser drops the phone's
+        // Bluetooth audio link while a WebRTC media transport is active (docs/BROWSER_AUDIO.md).
+        private val codecStreamPreferred =
+            AirPlayPersistence.loadBluetoothAudioPriority(context) &&
+                !AirPlayPersistence.loadBrowserAudioPlayback(context)
+        private var vcs: CodecVideoStream? = null
+        private var vcsSource: WebVideoSource? = null
+        private var vcsConfig: WebVideoSource.Config? = null
+        private var vcsId = 0L
+        private val vcsRetry = RtcRetryPolicy()
+        private var vcsHint: String? = null
+        private var vcsAvailableSince = 0L
+        private var vcsNotRequested = false
         // Stage-tagged WebRTC evidence: head units have no reachable console, so the phone keeps
         // what it can see from its own offer and from the browser's answer and fallback reason.
         private var rtcAnswer: RtcSdpSummary.Summary? = null
@@ -488,7 +501,7 @@ internal class LanWebServer(
                     // WebRTC attempt. Log it so the head-unit retry cadence is visible from the
                     // Android host logcat without a browser console; a repeated cadence here is the
                     // "flicker every so often" the Tesla browser reports.
-                    if (rtcRetry.attempted) {
+                    if (rtcRetry.attempted || vcsRetry.attempted) {
                         Log.i(
                             "WheelPlayWeb",
                             "rtc-attempt re-armed t=${SystemClock.elapsedRealtime()} " +
@@ -496,9 +509,12 @@ internal class LanWebServer(
                         )
                     }
                     stopRtc()
+                    stopVcs()
                     rtcSource = source
                     rtcConfig = source?.config
+                    vcsConfig = source?.config
                     rtcRetry.reset()
+                    vcsRetry.reset()
                 }
             }
 
@@ -589,6 +605,83 @@ internal class LanWebServer(
                 rtc = stream
                 if (!source.attach(stream, config)) {
                     stopRtc()
+                    return
+                }
+                stream.start()
+            }
+        }
+
+        private fun stopVcs(retryable: Boolean = true) =
+            synchronized(rtcLock) {
+                val old = vcs
+                vcs = null
+                vcsRetry.finish(retryable)
+                if (old != null) {
+                    vcsSource?.detach(old)
+                    old.close()
+                    reply(
+                        WebStreamSender.Control.VCS,
+                        JSONObject().put("type", "vcs-stop").put("id", vcsId).toString(),
+                    )
+                }
+                sender.frameAvailable()
+            }
+
+        private fun startVcs() {
+            // Same monitor discipline as startRtc: never take the WebSession lock inside rtcLock.
+            val media = WebSession.mediaSnapshot()
+            synchronized(rtcLock) {
+                reconcileVideo()
+                if (vcs != null || !vcsRetry.available || ended.get() || !WebSession.videoActive) return
+                if (rtc != null) return // One consumer per compressed source.
+                if (!codecStreamPreferred) return
+                val source = vcsSource ?: return
+                val config = vcsConfig ?: return
+                if (media.source !== source || media.sourceState == "stopped") return
+                if (config.codec == VideoCodec.H265) {
+                    // The browser's WebCodecs HEVC support is unverifiable from the profile alone;
+                    // H.264 stays the codec stream's contract and JPEG remains the fallback.
+                    vcsHint = "vcs-hevc-unsupported"
+                    vcsRetry.block()
+                    return
+                }
+                if (!vcsRetry.start()) return
+                vcsHint = null
+                vcsAvailableSince = 0L
+                vcsNotRequested = false
+                val id = ++vcsId
+                Log.i(
+                    "WheelPlayWeb",
+                    "vcs-attempt start id=$id codec=${config.codec.name} profile=${config.profile} " +
+                        "t=${SystemClock.elapsedRealtime()}",
+                )
+                val recovery =
+                    com.shilapi.xcertplay.AirPlayPersistence.loadRtcRecoveryPolicy(context)
+                val stream =
+                    CodecVideoStream(
+                        source,
+                        config,
+                        recovery,
+                        write = { packet -> sender.video(packet) },
+                        failure = { retryable -> synchronized(rtcLock) { if (vcsId == id) stopVcs(retryable) } },
+                    )
+                vcs = stream
+                // The control write is ordered before the first video frame in the same sender, so
+                // the browser learns the codec before the first access unit arrives.
+                reply(
+                    WebStreamSender.Control.VCS,
+                    JSONObject()
+                        .put("type", "vcs-start")
+                        .put("id", id)
+                        .put("sessionId", media.sessionId)
+                        .put("videoEpoch", media.videoEpoch)
+                        .put("codec", config.codec.name)
+                        .put("profile", config.profile)
+                        .put("recoveryGraceMs", recovery.graceMs)
+                        .toString(),
+                )
+                if (!source.attach(stream, config)) {
+                    stopVcs()
                     return
                 }
                 stream.start()
@@ -789,10 +882,15 @@ internal class LanWebServer(
                         synchronized(rtcLock) {
                             val frame = media.frame
                             val mediaRtc = rtc.takeIf { rtcSource === media.source }
+                            val mediaVcs = vcs.takeIf { vcsSource === media.source }
                             val rtcAvailable =
-                                mediaRtc == null && rtcSource === media.source && rtcConfig != null &&
-                                    rtcRetry.available && media.sourceState == "ready" &&
+                                !codecStreamPreferred && mediaRtc == null && rtcSource === media.source &&
+                                    rtcConfig != null && rtcRetry.available && media.sourceState == "ready" &&
                                     !WebSession.localDisplayActive
+                            val vcsAvailable =
+                                codecStreamPreferred && mediaVcs == null && mediaRtc == null &&
+                                    vcsSource === media.source && vcsConfig != null && vcsRetry.available &&
+                                    media.sourceState == "ready" && !WebSession.localDisplayActive
                             if (rtcAvailable) {
                                 val at = SystemClock.elapsedRealtime()
                                 if (rtcAvailableSince == 0L) rtcAvailableSince = at
@@ -808,6 +906,21 @@ internal class LanWebServer(
                                     )
                                 }
                             } else rtcAvailableSince = 0L
+                            if (vcsAvailable) {
+                                val at = SystemClock.elapsedRealtime()
+                                if (vcsAvailableSince == 0L) vcsAvailableSince = at
+                                else if (!vcsNotRequested && at - vcsAvailableSince >= 15000) {
+                                    // A browser predating the codec stream never sends vcs-start; the
+                                    // hint distinguishes that from a blocked retry in ?diag=1.
+                                    vcsNotRequested = true
+                                    vcsHint = "vcs-not-requested"
+                                    Log.i(
+                                        "WheelPlayWeb",
+                                        "vcs-not-requested waited=${at - vcsAvailableSince}ms " +
+                                            "codec=${vcsConfig?.codec?.name ?: "none"}",
+                                    )
+                                }
+                            } else vcsAvailableSince = 0L
                             reply(
                                 WebStreamSender.Control.STATUS,
                                 JSONObject()
@@ -838,9 +951,12 @@ internal class LanWebServer(
                                             media.sourceState == "ready" &&
                                             (frame != null ||
                                                 mediaRtc?.connected == true ||
-                                                mediaRtc?.holdingFrame == true),
+                                                mediaRtc?.holdingFrame == true ||
+                                                mediaVcs?.holdingFrame == true),
                                     )
                                     .put("rtcAvailable", rtcAvailable)
+                                    .put("vcsAvailable", vcsAvailable)
+                                    .put("vcsHint", vcsHint ?: "")
                                     .put("rtcHint", rtcHint ?: "")
                                     .put(
                                         "rtcDiag",
@@ -887,6 +1003,9 @@ internal class LanWebServer(
                                     .put("rtcRetryAfterMs", rtcRetry.retryAfterMs)
                                     .put("rtcRetryBlocked", rtcRetry.blocked)
                                     .put("rtcFrames", mediaRtc?.sentFrames ?: 0)
+                                    .put("vcsRetryAfterMs", vcsRetry.retryAfterMs)
+                                    .put("vcsRetryBlocked", vcsRetry.blocked)
+                                    .put("vcsFrames", mediaVcs?.sentFrames ?: 0)
                                     .put(
                                         "performance",
                                         JSONObject()
@@ -894,7 +1013,7 @@ internal class LanWebServer(
                                                 "source",
                                                 rtcSource?.performanceSnapshot()?.let(::JSONObject),
                                             )
-                                            .put("transport", rtc?.snapshot()?.let(::JSONObject))
+                                            .put("transport", (rtc?.snapshot() ?: vcs?.snapshot())?.let(::JSONObject))
                                             .put("image", JSONObject(sender.imageSnapshot())
                                                 .put("format", media.frame?.format?.mime)
                                                 .put("quality", media.frame?.quality)
@@ -954,6 +1073,30 @@ internal class LanWebServer(
                         Log.i("WheelPlayWeb", "media $echo t=${SystemClock.elapsedRealtime()}")
                     }
                     "rtc-start" -> startRtc()
+                    "vcs-start" -> startVcs()
+                    "vcs-ready" ->
+                        synchronized(rtcLock) {
+                            if (data.getLong("id") == vcsId) vcs?.displayed()
+                        }
+                    "vcs-feedback" ->
+                        synchronized(rtcLock) {
+                            if (data.getLong("id") == vcsId) vcs?.feedback(data.getLong("decoded"))
+                        }
+                    "vcs-keyframe" ->
+                        synchronized(rtcLock) {
+                            if (data.getLong("id") == vcsId) vcsSource?.requestKeyframe()
+                        }
+                    "vcs-fallback" ->
+                        synchronized(rtcLock) {
+                            if (data.getLong("id") == vcsId) {
+                                Log.i(
+                                    "WheelPlayWeb",
+                                    "vcs-fallback id=$vcsId reason=${data.optString("reason", "client-fallback")} " +
+                                        "t=${SystemClock.elapsedRealtime()}",
+                                )
+                                stopVcs(data.optBoolean("retryable", true))
+                            }
+                        }
                     "rtc-answer" ->
                         synchronized(rtcLock) {
                             if (data.getLong("id") == rtcId && rtc != null && !rtcAnswered) {
@@ -1149,6 +1292,7 @@ internal class LanWebServer(
             if (!ended.compareAndSet(false, true)) return
             media.close()
             stopRtc()
+            stopVcs()
             synchronized(this@LanWebServer) {
                 if (viewer === this) {
                     WebSession.audio.detach(this)

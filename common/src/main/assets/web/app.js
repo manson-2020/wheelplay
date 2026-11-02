@@ -284,7 +284,7 @@ export function createControlOutbox(socket, {
         if (kind === 'move' && tail && tail.kind === 'move' && tail.type === data.type && tail.eventKind === data.kind) tail.json = json;
         else if (touches.length < 64) touches.push({ kind, json, type: data.type, eventKind: data.kind });
         else { fail(); return false; }
-      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'phone-connect', 'image-format', 'location-start', 'location-stop', 'location-clear', 'media', 'media-command', 'browser-appearance'].includes(data.type)) {
+      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'vcs-start', 'vcs-ready', 'vcs-fallback', 'vcs-feedback', 'vcs-keyframe', 'phone-connect', 'image-format', 'location-start', 'location-stop', 'location-clear', 'media', 'media-command', 'browser-appearance'].includes(data.type)) {
         if (signals.length >= 8 || json.length > 32768) { fail(); return false; }
         if (data.type.startsWith('location-')) locationFix = null;
         signals.push(json);
@@ -600,9 +600,12 @@ export function createVideoRenderer(mode, canvas, {
 }
 
 // Video WebRTC remains receive-only. Browser audio uses the paired WebSocket.
+// `experiment` runs the head-unit Bluetooth diagnostics in this page (see BROWSER_AUDIO.md):
+// `noanswer` parses the offer but never answers, `inactive` answers with the media direction held
+// back - together they tell apart offer parsing, transport setup and media flow as the trigger.
 export function createRtcReceiver(createRenderer, {
   send, onReady = () => {}, onStop = () => {}, onStats = () => {},
-  onResize = () => {}, onReset = () => {},
+  onResize = () => {}, onReset = () => {}, experiment = '',
   createPeer = () => new RTCPeerConnection({ iceServers: [] }),
   supportsCodec = codec => {
     if (typeof RTCRtpReceiver === 'undefined' || !RTCRtpReceiver.getCapabilities) return true;
@@ -686,7 +689,14 @@ export function createRtcReceiver(createRenderer, {
     // report what it supports and whether the WebRTC APIs exist at all.
     send({ type: 'rtc-diag', id, ...diagnostics() });
     if (!supportsCodec(codec)) { fallback('codec-unsupported', false); return; }
-    timeout = schedule(() => { if (generation === token) fallback('first-frame-timeout'); }, Math.max(10000, recoveryGraceMs));
+    // `?rtcexp=noanswer` stops after parsing: no peer is created, so nothing on the car can run.
+    if (experiment === 'noanswer') {
+      timeout = schedule(() => { if (generation === token) fallback('exp:noanswer'); }, 15000);
+      return;
+    }
+    timeout = schedule(() => { if (generation === token)
+      fallback(experiment === 'inactive' ? 'exp:inactive-first-frame' : 'first-frame-timeout');
+    }, Math.max(10000, recoveryGraceMs));
     try {
       const pc = createPeer(); peer = pc;
       const displayed = size => {
@@ -794,9 +804,13 @@ export function createRtcReceiver(createRenderer, {
       catch (error) { if (generation === token) fallback(`answer:${errorName(error)}`, isRtcErrorRetryable(error)); return; }
       if (!current()) return;
       if (/^m=video 0(?: |\r?$)/m.test(answer.sdp)) { fallback('codec-rejected', false); return; }
+      // `?rtcexp=inactive` holds the media direction back: ICE and DTLS still establish but no RTP
+      // flows, so a Bluetooth drop then names transport setup rather than media flow as the trigger.
+      const rewritten = experiment === 'inactive'
+        ? answer.sdp.replace(/a=(?:sendrecv|recvonly|sendonly)/g, 'a=inactive') : answer.sdp;
       // Use the browser as DTLS server: Mbed TLS 3.6 cannot reassemble a fragmented
       // ClientHello from newer Chrome versions. Passive is a standard answer role.
-      const passive = { type: answer.type, sdp: answer.sdp.replace(/a=setup:active/g, 'a=setup:passive') };
+      const passive = { type: answer.type, sdp: rewritten.replace(/a=setup:active/g, 'a=setup:passive') };
       try { await pc.setLocalDescription(passive); }
       catch (_) {
         // Some head-unit builds reject a rewritten DTLS role; keep the generated answer.
@@ -867,6 +881,126 @@ export function createRtcReceiver(createRenderer, {
     progress(count) {
       if (count > sent) {
         if (now() - lastSentAt >= 2000) { stalledSince = null; renderStalledSince = null; }
+        lastSentAt = now();
+      }
+      sent = count;
+    },
+  };
+}
+
+// The WebSocket codec stream: compressed H.264 access units over the paired WebSocket, decoded by
+// WebCodecs and drawn onto the canvas. It exists for head units whose browser drops the phone's
+// Bluetooth audio link while a WebRTC media transport is active (BROWSER_AUDIO.md): the conflict
+// follows the peer connection itself, not any audio the page plays, so this path keeps Bluetooth
+// and the wheel keys while still decoding the iPhone's own H.264 instead of JPEG images.
+export const CODEC_STREAM_MAGIC = 0x31564357; // WCV1, matches CodecPacket.MAGIC
+export function createCodecReceiver(drawFrame, {
+  send, onReady = () => {}, onStop = () => {}, onStats = () => {}, onReset = () => {},
+  supportsCodec = config => typeof VideoDecoder === 'undefined' ? Promise.resolve(false)
+    : VideoDecoder.isConfigSupported(config).then(result => result?.supported === true),
+  schedule = setTimeout, cancel = clearTimeout, now = () => Date.now(),
+} = {}) {
+  let decoder = null, id = null, generation = 0, ready = false, codec = 'H264', keySeen = false;
+  let config = null, lastSequence = null;
+  let timeout = null, statsTimer = null, recoveryGraceMs = 10000;
+  let decoded = 0, sent = 0, lastDecoded = 0, sentAtLastProgress = 0, lastSentAt = 0, stalledSince = null, fpsPrevious = null;
+  let lastReason = null;
+  function current() { return decoder !== null && generation === decoder.__token; }
+  function close() {
+    generation++; cancel(timeout); cancel(statsTimer);
+    timeout = statsTimer = null;
+    stalledSince = null; const old = decoder; decoder = null; ready = false; id = null;
+    onReset();
+    if (old) { try { old.close(); } catch (_) {} }
+  }
+  function fallback(reason = 'connection-failed', retryable = true) {
+    const currentId = id;
+    if (currentId === null) return;
+    lastReason = reason;
+    close(); onStop(reason);
+    send({ type: 'vcs-fallback', id: currentId, reason, ...(retryable ? {} : { retryable: false }) });
+  }
+  function receive(message) {
+    if (message.type === 'vcs-stop') {
+      if (message.id === id) { close(); onStop('server-stop'); }
+      return;
+    }
+    if (message.type !== 'vcs-start') return;
+    close(); id = message.id; codec = message.codec === 'H265' ? 'H265' : 'H264';
+    recoveryGraceMs = [4000, 10000, 30000].includes(message.recoveryGraceMs) ? message.recoveryGraceMs : 10000;
+    const token = generation;
+    if (typeof VideoDecoder === 'undefined') { fallback('codec-unsupported', false); return; }
+    // H.264 arrives as an Annex B byte stream, so no decoder description is configured; the
+    // parameter sets ride inside the keyframe access units instead.
+    config = { codec: `avc1.${message.profile}`, optimizeForLatency: true };
+    keySeen = false; lastSequence = null; fpsPrevious = null;
+    timeout = schedule(() => { if (generation === token) fallback('first-frame-timeout'); }, Math.max(10000, recoveryGraceMs));
+    const displayed = size => {
+      if (!current() || ready || !size.width || !size.height) return;
+      ready = true; cancel(timeout); timeout = null;
+      lastReason = null;
+      decoded = 0; sent = 0; sentAtLastProgress = 0; lastSentAt = now();
+      send({ type: 'vcs-ready', id }); onReady(size);
+      if (current()) statsTimer = schedule(sample, 1000);
+    };
+    const sample = () => {
+      if (!current()) return;
+      const at = now();
+      if (decoded !== lastDecoded || sent <= sentAtLastProgress || at - lastSentAt >= 2000) {
+        stalledSince = null; sentAtLastProgress = sent;
+      } else if (stalledSince === null) stalledSince = at;
+      const fps = fpsPrevious ? Math.max(0, decoded - fpsPrevious.count) * 1000 / Math.max(1, at - fpsPrevious.at) : null;
+      fpsPrevious = { at, count: decoded };
+      onStats(fps, { decodedFps: fps, decoded });
+      send({ type: 'vcs-feedback', id, decoded });
+      lastDecoded = decoded;
+      // Static CarPlay screens legitimately stop producing frames; server progress freezes with
+      // them, so the deadline only runs while the phone keeps sending (see progress).
+      if (stalledSince !== null && at - stalledSince >= recoveryGraceMs) { fallback('decode-stall'); return; }
+      if (current()) statsTimer = schedule(sample, 1000);
+    };
+    supportsCodec(config).then(ok => {
+      if (generation !== token) return;
+      if (!ok) { fallback('codec-unsupported', false); return; }
+      try {
+        decoder = new VideoDecoder({
+          output: frame => {
+            decoded++;
+            const size = { width: frame.displayWidth, height: frame.displayHeight };
+            try { drawFrame(frame); } finally { frame.close(); }
+            displayed(size);
+          },
+          error: () => { if (current()) fallback('decode-error'); },
+        });
+        decoder.__token = token;
+        decoder.configure(config);
+      } catch (_) { fallback('codec-unsupported', false); }
+    });
+  }
+  function feed(buffer) {
+    if (!decoder || decoder.state !== 'configured') return;
+    const view = new DataView(buffer);
+    const keyframe = view.getUint16(20, true) === 1;
+    const sequence = Number(view.getBigInt64(4, true));
+    // A sender-side drop breaks the prediction chain; only a keyframe can restart decoding.
+    if (lastSequence !== null && sequence !== lastSequence + 1 && !(keyframe && keySeen)) return;
+    if (!keyframe && !keySeen) return;
+    lastSequence = sequence;
+    if (keyframe && !keySeen) { keySeen = true; try { decoder.reset(); decoder.configure(config); } catch (_) { return; } }
+    try {
+      decoder.decode(new EncodedVideoChunk({
+        type: keyframe ? 'key' : 'delta',
+        timestamp: Number(view.getBigInt64(12, true)),
+        data: new Uint8Array(buffer, 24 + view.getUint16(22, true)),
+      }));
+    } catch (_) {}
+  }
+  return { receive, feed, close, get active() { return ready; }, get codec() { return codec; },
+    get lastReason() { return lastReason; },
+    get recovering() { return ready && stalledSince !== null; },
+    progress(count) {
+      if (count > sent) {
+        if (now() - lastSentAt >= 2000) stalledSince = null;
         lastSentAt = now();
       }
       sent = count;
@@ -1106,9 +1240,15 @@ if (typeof document !== 'undefined') {
   const diagnosticStatus = queryFlag('diag');
   const keepVideoVisible = queryFlag('unhide');
   const autoLaunch = queryFlag('auto');
+  // `?rtcexp=noanswer|inactive` runs the Bluetooth-conflict probes inside the normal negotiation.
+  const rtcExperiment = (String(location.search || '').match(/[?&]rtcexp=(noanswer|inactive)(?:&|$)/) || [])[1] || '';
   // `?ms=1` registers a Media Session; `?ms=2` additionally plays browser audio through a media
   // element, which is what Chrome requires before it routes platform media keys to the page.
   const mediaSessionMode = (String(location.search || '').match(/[?&]ms=([12])(?:&|$)/) || [])[1] || '';
+  // `?audioIdle=<ms>` tunes how long the page keeps its audio output open after the last sound; 0
+  // disables the release entirely for a head unit that needs a permanently open sink.
+  const audioIdleMatch = Number((String(location.search || '').match(/[?&]audioIdle=(\d+)(?:&|$)/) || [])[1]);
+  const audioIdleMillis = Number.isFinite(audioIdleMatch) && audioIdleMatch >= 0 ? audioIdleMatch : 5000;
   const screen = $('screen');
   const screens = [screen, $('screen-next'), $('screen-third')];
   const heldFrame = $('held-frame');
@@ -1122,11 +1262,12 @@ if (typeof document !== 'undefined') {
   const webpSupport = probeWebp();
   Object.defineProperty(window, 'wheelplayStats', { configurable: true, get: () => JSON.parse(JSON.stringify(performanceStats)) });
   let rtc = null, rtcRequested = false, rtcFps = null;
+  let codec = null, codecRequested = false, codecFps = null;
   // Latest server-side WebRTC hint and capability snapshot, kept for the ?diag=1 status line.
   let serverRtcHint = '', serverRtcDiag = '';
   let serverMedia = null;
   let socket = null, stopped = true, paired = false, retry = null, attempts = 0;
-  let width = 1280, height = 720, live = false, lastStatus = 0, rtcMedia = {};
+  let width = 1280, height = 720, live = false, lastStatus = 0, rtcMedia = {}, codecMedia = {};
   let heartbeat = null, movePending = false, moveGeneration = 0, outbox = null;
   let authGeneration = 0, deviceCredential = null, storageAvailable = false;
   let launchPresentation = null;
@@ -1212,6 +1353,10 @@ if (typeof document !== 'undefined') {
   }
   function showRtcSize(size) {
     if (!presentation.present(rtcMedia, size.width, size.height, 'rtc', rtcMedia.revision)) return;
+    width = size.width; height = size.height; jpeg.cancelPending(); jpeg.hide(); clearHeldFrame();
+  }
+  function showCodecSize(size) {
+    if (!presentation.present(codecMedia, size.width, size.height, 'codec', codecMedia.revision)) return;
     width = size.width; height = size.height; jpeg.cancelPending(); jpeg.hide(); clearHeldFrame();
   }
   const pairApi = async (path, request = null) => {
@@ -1392,6 +1537,7 @@ if (typeof document !== 'undefined') {
   const browserAudio = createBrowserAudio({
     send,
     useElementSink: mediaSessionMode === '2',
+    idleCloseMillis: audioIdleMillis,
     sendBinary: packet => {
       if (socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 8192) return false;
       try { socket.send(packet); return true; } catch (_) { return false; }
@@ -1473,10 +1619,14 @@ if (typeof document !== 'undefined') {
     $('desktop-back').disabled = !live;
     if (!live && (pointers.size || desktop.active)) release();
     const rtcVisible = rtc && value.visible && value.frame?.transport === 'rtc';
-    rendererStats.activeMode = rtcVisible ? launchMode : value.visible ? 'jpeg' : 'waiting';
+    const codecVisible = codec && value.visible && value.frame?.transport === 'codec';
+    rendererStats.activeMode = codecVisible ? 'codec' : rtcVisible ? launchMode : value.visible ? 'jpeg' : 'waiting';
     const rendererLabel = launchMode === 'native' ? 'Video' : t(launchMode === 'video-canvas' ? 'web_video_renderer_compat' : 'web_video_renderer_direct');
     const fallbackLabel = rendererStats.fallbackReason ? t(rendererStats.fallbackReason === 'processor-unsupported' ? 'web_video_renderer_unavailable' : 'web_video_renderer_failed') : '';
-    const transport = rtcVisible ? `${rtc.codec === 'H265' ? 'HEVC' : 'H.264'} / WebRTC / ${rendererLabel}${rtcFps === null ? '' : ` · ${rtcFps} fps`}` : `${value.frame?.mime === 'image/webp' ? 'WebP' : 'JPEG'}${fallbackLabel}`;
+    const transport = codecVisible
+      ? `${codec.codec === 'H265' ? 'HEVC' : 'H.264'} / WS${codecFps === null ? '' : ` · ${codecFps} fps`}`
+      : rtcVisible ? `${rtc.codec === 'H265' ? 'HEVC' : 'H.264'} / WebRTC / ${rendererLabel}${rtcFps === null ? '' : ` · ${rtcFps} fps`}`
+      : `${value.frame?.mime === 'image/webp' ? 'WebP' : 'JPEG'}${fallbackLabel}`;
     // ?diag=1 keeps the status line short: the fixed-height top bar cannot hold a negotiation
     // snapshot without overflowing over the picture. The detail goes into its own box instead.
     const rtcReason = rtc?.lastReason || serverRtcHint;
@@ -1512,7 +1662,8 @@ if (typeof document !== 'undefined') {
     heldFrame.hidden = true; heldFrame.width = heldFrame.height = 0;
   }
   function holdRtcFrame() {
-    if (presentation.current.frame?.transport !== 'rtc' || !heldFrame.hidden) return;
+    const transport = presentation.current.frame?.transport;
+    if ((transport !== 'rtc' && transport !== 'codec') || !heldFrame.hidden) return;
     try {
       const source = canvas.hidden ? video : canvas;
       const frame = presentation.current.frame;
@@ -1526,6 +1677,7 @@ if (typeof document !== 'undefined') {
   }
   function cleanupRtc() {
     if (rtc) rtc.close(); rtc = null; rtcRequested = false; rtcFps = null;
+    if (codec) codec.close(); codec = null; codecRequested = false; codecFps = null;
     video = null;
     performanceStats.source = performanceStats.transport = performanceStats.receiver = performanceStats.image = null;
     rendererStats.activeMode = 'waiting';
@@ -1703,7 +1855,7 @@ if (typeof document !== 'undefined') {
           return createTrackCanvasRenderer(canvas, callbacks);
         }
         return createVideoRenderer(mode, canvas, { ...callbacks, createVideo: createLegacyVideo, keepVisible: keepVideoVisible });
-      }, { send,
+      }, { send, experiment: rtcExperiment,
         onReset: () => { holdRtcFrame(); presentation.invalidate('rtc'); },
         onResize: size => { if (socket === ws) showRtcSize(size); },
         onReady: size => {
@@ -1721,6 +1873,34 @@ if (typeof document !== 'undefined') {
           const outputFps = mode === 'track-canvas' ? metrics.renderedFps : fps;
           rtcFps = outputFps === null ? null : Math.round(outputFps); performanceStats.receiver = metrics;
           rendererStats.renderedFps = metrics.renderedFps; rendererStats.renderedFrames = metrics.renderedFrames;
+          presentation.refresh();
+        },
+      });
+      codec = createCodecReceiver(frame => {
+        const size = { width: frame.displayWidth, height: frame.displayHeight };
+        try {
+          const resized = canvas.width !== size.width || canvas.height !== size.height;
+          if (resized) { canvas.width = size.width; canvas.height = size.height; }
+          canvas.getContext('2d', { alpha: false }).drawImage(frame, 0, 0, size.width, size.height);
+          canvas.hidden = false;
+        } finally { frame.close(); }
+        return size;
+      }, { send,
+        onReset: () => { holdRtcFrame(); presentation.invalidate('codec'); },
+        onReady: size => {
+          if (socket !== ws) return;
+          rendererStats.activeMode = 'codec'; rendererStats.fallbackReason = null;
+          rendererStats.renderedFrames = 1;
+          showCodecSize(size);
+        },
+        onStop: reason => {
+          if (socket !== ws) return;
+          codecFps = null; rendererStats.fallbackReason = reason;
+          presentation.invalidate('codec');
+        },
+        onStats: (fps, metrics) => {
+          codecFps = fps === null ? null : Math.round(fps); performanceStats.receiver = metrics;
+          rendererStats.renderedFps = fps; rendererStats.renderedFrames = metrics.decoded;
           presentation.refresh();
         },
       });
@@ -1758,6 +1938,16 @@ if (typeof document !== 'undefined') {
           }
           rtc.receive(data); return;
         }
+        if (data.type === 'vcs-start' || data.type === 'vcs-stop') {
+          if (data.type === 'vcs-stop') codecRequested = false;
+          else {
+            const previousRevision = presentation.current.revision;
+            if (!presentation.accepts(data)) return;
+            if (previousRevision !== presentation.current.revision) jpeg.cancelPending();
+            codecMedia = { ...data, revision: presentation.current.revision };
+          }
+          codec.receive(data); return;
+        }
         if (data.type === 'phone-connect-result') {
           $('phone-connect').disabled = false;
           $('phone-connect-message').textContent = data.message;
@@ -1789,9 +1979,15 @@ if (typeof document !== 'undefined') {
           if (previousRevision !== presentation.current.revision) {
             jpeg.cancelPending();
             if (rtcMedia.revision !== presentation.current.revision) { rtc.close(); rtcRequested = false; }
+            if (codecMedia.revision !== presentation.current.revision) { codec.close(); codecRequested = false; }
           }
           $('stage').textContent = data.stage || t("web_waiting_for_iphone_video");
           rtc.progress(data.rtcFrames || 0);
+          codec.progress(data.vcsFrames || 0);
+          if (data.vcsAvailable && !codecRequested && !codec.active && typeof VideoDecoder !== 'undefined') {
+            codecRequested = true; send({ type: 'vcs-start' });
+          }
+          if (!data.vcsAvailable) codecRequested = false;
           if (data.rtcAvailable && !rtcRequested && !rtc.active && typeof RTCPeerConnection !== 'undefined' &&
               (mode !== 'track-canvas' || processorSupported())) {
             rtcRequested = true; send({ type: 'rtc-start' });
@@ -1804,6 +2000,11 @@ if (typeof document !== 'undefined') {
         return;
       }
       if (browserAudio.receive(event.data)) return;
+      // The codec stream's access units share the image socket but carry their own magic.
+      if (event.data instanceof ArrayBuffer && event.data.byteLength >= 24 &&
+          new DataView(event.data).getUint32(0, true) === CODEC_STREAM_MAGIC) {
+        codec.feed(event.data); return;
+      }
       let packet;
       try { packet = decodeVideoPacket(event.data); } catch (_) { ws.close(); return; }
       const meta = packet || {};

@@ -288,4 +288,26 @@ class WebStreamSenderTest {
             assertEquals(listOf("one", "two"), sent)
         } finally { sender.close() }
     }
+
+    @Test fun codecFramesDrainBeforeImagesAndDropNewOnesPastTheBound() {
+        val executor = ManualExecutor()
+        val sent = mutableListOf<ByteArray>()
+        var latest: WebSession.Frame? = WebSession.Frame(byteArrayOf(9), 0, 1)
+        val sender = WebStreamSender({ latest }, { sent.add(it.binaryPayload) }, { fail() }, executor, { 0 })
+        try {
+            assertTrue(sender.video(ByteArray(10)))
+            assertTrue(sender.video(ByteArray(11)))
+            executor.runNext()
+            // Codec frames drain ahead of the still image, which keeps flowing until the codec
+            // stream reports its first decoded frame.
+            assertEquals(listOf(10, 11, 1), sent.map { it.size })
+            // The bound matches the WebRTC send queue: six frames or two mebibytes; six 300 KB
+            // frames stay under the byte bound so the seventh trips the frame count.
+            for (id in 1..6) assertTrue(sender.video(ByteArray(300_000)))
+            assertFalse("the seventh frame drops instead of queueing", sender.video(ByteArray(1)))
+            executor.runNext()
+            assertEquals(6, sent.size - 3)
+            sender.clearVideo()
+        } finally { sender.close() }
+    }
 }

@@ -160,4 +160,31 @@ class BrowserAudioBridgeTest {
         } finally { route.close(); bridge.detach(owner) }
     }
 
+    @Test fun mediaSplitKeepsMusicLocalWhilePromptsStillReachThePage() {
+        val bridge = BrowserAudioBridge(); val owner = Any()
+        val packets = mutableListOf<ByteArray>(); val controls = mutableListOf<String>()
+        val route = bridge.createRoute()
+        val prompt = AudioFormat(AudioCodecKind.LPCM, 48_000, 1, 96, "alert")
+        var remote = true
+        route.onPlaybackRouteChanged { remote = it }
+        bridge.configure(true, false, mediaToBrowser = false)
+        bridge.attach(owner, true, { packet, _ -> packets.add(packet) }, controls::add)
+        bridge.ready(owner, true, false)
+        assertFalse("music must stay on the phone", route.output(1, format, byteArrayOf(1, 2, 3, 4), 0, 4))
+        assertTrue(packets.isEmpty())
+        assertFalse("a page with no media output is not the media route", remote)
+        assertTrue("prompts and navigation still travel", route.output(2, prompt, byteArrayOf(1, 2), 0, 2))
+        assertEquals(1, packets.size)
+        val mediaFlag = ByteBuffer.wrap(packets.single()).order(ByteOrder.LITTLE_ENDIAN)
+            .apply { position(14) }.short.toInt()
+        assertEquals("a prompt is not media", 0, mediaFlag)
+        route.audioStopped(1)
+        assertFalse(remote)
+        // Turning the split back off hands media to the page again without a reconnect.
+        bridge.configure(true, false, mediaToBrowser = true)
+        assertTrue(route.output(1, format, byteArrayOf(1, 2, 3, 4), 0, 4))
+        assertTrue("the media route is republished as remote", remote)
+        bridge.detach(owner)
+        route.close()
+    }
 }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRtcReceiver, createControlOutbox, createVideoRenderer } from '../common/src/main/assets/web/app.js';
 
-function fixture(createPeer, supportsCodec = () => true, rendererFactory = null) {
+function fixture(createPeer, supportsCodec = () => true, rendererFactory = null, experiment = '') {
   const sent = [], measurements = [], timers = new Map();
   let sequence = 0, clock = 0, ready = 0, stopped = 0;
   const video = { videoWidth: 1280, videoHeight: 720, readyState: 2, play: async () => {}, remove() {} };
@@ -13,7 +13,7 @@ function fixture(createPeer, supportsCodec = () => true, rendererFactory = null)
   };
   const receiver = createRtcReceiver(rendererFactory || (callbacks => createVideoRenderer('native', null, { ...callbacks, createVideo: () => video })), { send: m => sent.push(m), supportsCodec, createPeer: createPeer || (() => pc),
     onStats: (fps, metrics) => measurements.push({ fps, metrics }),
-    onReady: () => ready++, onStop: () => stopped++, now: () => clock,
+    onReady: () => ready++, onStop: () => stopped++, now: () => clock, experiment,
     schedule(fn, delay) { const id = ++sequence; timers.set(id, { fn, delay }); return id; },
     cancel(id) { timers.delete(id); },
   });
@@ -39,6 +39,22 @@ test('JPEG remains active until the browser actually decodes a video frame', asy
   f.pc.connectionState = 'connected'; f.pc.onconnectionstatechange();
   assert.equal([...f.timers.values()].some(t => t.delay === 10000), false);
   assert.equal(f.sent.some(m => m.type === 'rtc-fallback'), false);
+});
+
+test('?rtcexp probes distinguish offer parsing from transport setup without touching media', async () => {
+  const silent = fixture(null, () => true, null, 'noanswer');
+  await silent.receiver.receive({ type: 'rtc-offer', id: 30, sdp: 'offer' });
+  assert.equal(silent.pc.closed, undefined, 'no peer may be created before the answer');
+  assert.deepEqual(silent.sent.filter(m => m.type === 'rtc-answer'), []);
+  await silent.tick(15000, 15000);
+  assert.deepEqual(silent.sent.at(-1), { type: 'rtc-fallback', id: 30, reason: 'exp:noanswer' });
+  const held = fixture(null, () => true, null, 'inactive');
+  held.pc.createAnswer = async () => ({ type: 'answer', sdp: 'a=recvonly\r\na=setup:active\r\n' });
+  await held.receiver.receive({ type: 'rtc-offer', id: 31, sdp: 'offer' });
+  assert.match(held.pc.appliedAnswer.sdp, /a=inactive/);
+  assert.doesNotMatch(held.pc.appliedAnswer.sdp, /a=recvonly/);
+  await held.tick(10000, 10000);
+  assert.deepEqual(held.sent.at(-1), { type: 'rtc-fallback', id: 31, reason: 'exp:inactive-first-frame' });
 });
 
 test('missing WebRTC and first-frame timeout both fall back without closing the control socket', async () => {

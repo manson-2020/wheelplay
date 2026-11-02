@@ -72,6 +72,7 @@ object AirPlayPersistence {
     private const val KEY_HIDE_BOTTOM_BAR = "hide_bottom_bar"
     private const val KEY_ADAPTIVE_BROWSER_SIZE = "adaptive_browser_size"
     private const val KEY_BROWSER_AUDIO_PLAYBACK = "browser_audio_playback"
+    private const val KEY_BROWSER_MEDIA_TO_PAGE = "browser_media_to_page"
     private const val KEY_BROWSER_MICROPHONE = "browser_microphone"
     private const val KEY_MICROPHONE_SOURCE = "microphone_source"
     private const val KEY_APPEARANCE = "carplay_appearance"
@@ -108,6 +109,20 @@ object AirPlayPersistence {
     fun saveBrowserAudioPlayback(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_BROWSER_AUDIO_PLAYBACK, enabled).apply()
+    }
+
+    /**
+     * True: every sound, music included, is played by the browser page. False (the split of
+     * docs/BROWSER_AUDIO.md): music, calls and Siri stay on this phone and its own audio route while
+     * the page only gets navigation prompts and alerts. Head units that treat a playing page as a
+     * music source and drop Bluetooth in consequence need this split to keep both.
+     */
+    fun loadBrowserMediaToPage(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_BROWSER_MEDIA_TO_PAGE, true)
+
+    fun saveBrowserMediaToPage(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_BROWSER_MEDIA_TO_PAGE, enabled).apply()
     }
 
     fun loadBrowserMicrophone(context: Context): Boolean = loadMicrophoneSource(context) == CarPlayMicrophoneSource.BROWSER

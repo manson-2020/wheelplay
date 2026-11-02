@@ -57,7 +57,9 @@
     <string name="settings_audio_output">Audio output</string>
     <string name="settings_audio_output_description">Switches immediately. Falls back to Android when the browser is not ready or is offline. You may need to tap the browser page to enable sound.</string>
     <string name="settings_bluetooth_audio">Prefer Bluetooth audio</string>
-    <string name="settings_bluetooth_audio_description">Some head units disconnect Bluetooth audio as soon as the browser plays video, which also loses the steering wheel keys. While audio output is the Android device, this keeps the picture on the JPEG / WebP image transport instead of WebRTC. Applies after the iPhone reconnects.</string>
+    <string name="settings_browser_media">Play music in the browser</string>
+    <string name="settings_browser_media_description">On: the page plays every sound, music included. Off: music, calls and Siri stay on this phone and play through its own audio route, while the page only gets navigation prompts and alerts - the way to keep Bluetooth audio on head units that treat a playing page as a music source. Applies immediately while the audio output is the browser.</string>
+    <string name="settings_bluetooth_audio_description">Some head units disconnect Bluetooth audio as soon as the browser plays video, which also loses the steering wheel keys. While audio output is the Android device, the page switches from WebRTC to compressed video over the pairing socket, which those head units tolerate; browsers without WebCodecs stay on the JPEG / WebP image transport. Applies after the browser reconnects.</string>
     <string name="settings_microphone">Microphone source</string>
     <string name="settings_microphone_description">Reconnects after changes. The browser microphone requires trusted HTTPS and permission; Android is used until it is ready. Disabling stops uploads and removes the microphone capability.</string>
     <string name="settings_appearance">CarPlay day/night mode</string>

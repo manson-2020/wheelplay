@@ -39,14 +39,18 @@ export function createBrowserAudio({
   createWorklet = context => new AudioWorkletNode(context, 'wheelplay-microphone', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] }),
   useElementSink = false, createAudio = () => new Audio(),
   secure = () => window.isSecureContext && location.protocol === 'https:' && !!navigator.mediaDevices?.getUserMedia,
+  // A head unit reads an open audio output - even a silent one - as a music source and starts
+  // fighting the phone's Bluetooth over it (docs/BROWSER_AUDIO.md), so the output is released a few
+  // seconds after the last stream ends and reopened by the next prompt or call.
+  idleCloseMillis = 5000, schedule = setTimeout, cancel = clearTimeout,
 } = {}) {
   let context = null, playback = false, microphone = false, connected = false;
   let playbackGeneration = 0, microphoneGeneration = 0;
   let desiredPlayback = false, desiredMicrophone = false, gestureRetry = false;
   let mediaBufferMillis = 300;
   let stream = null, source = null, worklet = null, micId = null, micSequence = 0;
-  let elementSink = null;
-  const streams = new Map(), nodes = new Set();
+  let elementSink = null, idleTimer = 0, resuming = null;
+  const streams = new Map(), nodes = new Set(), pending = [];
   // Chrome only routes platform media keys to a tab whose HTMLMediaElement is playing audio, so
   // `?ms=2` moves the WebAudio output behind a media element instead of the raw context sink.
   function outputNode(audio) {
@@ -61,6 +65,35 @@ export function createBrowserAudio({
     return elementSink.destination;
   }
   function state(error = '') { onState({ playback, microphone, connected, error }); }
+  // Any delivery is activity: the idle deadline moves, and a released output is reopened for it.
+  function cancelIdleClose() {
+    if (idleTimer !== 0) { cancel(idleTimer); idleTimer = 0; }
+    // The media element owns the release even when no deadline is pending, so it is always reopened.
+    if (elementSink?.element.paused === true) {
+      try { const playing = elementSink.element.play?.(); if (playing?.catch) playing.catch(() => {}); } catch (_) {}
+    }
+  }
+  function armIdleClose() {
+    if (idleTimer !== 0) cancel(idleTimer);
+    idleTimer = 0;
+    if (!(idleCloseMillis > 0) || !context) return;
+    idleTimer = schedule(() => {
+      idleTimer = 0;
+      if (!playback || !connected || nodes.size || context?.state !== 'running') return;
+      if (elementSink) { try { elementSink.element.pause?.(); } catch (_) {} }
+      try { context.suspend?.(); } catch (_) {}
+    }, idleCloseMillis);
+  }
+  // A frame that arrives while the output is closed is replayed once it runs again.
+  function reopen(frame) {
+    if (pending.length < 64) pending.push(frame);
+    if (resuming) return;
+    resuming = Promise.resolve(context.resume()).then(() => {
+      resuming = null;
+      const buffered = pending.splice(0, pending.length);
+      for (const bufferedFrame of buffered) receive(bufferedFrame);
+    }, () => { resuming = null; pending.length = 0; });
+  }
   function readyState() { if (connected) send({ type: 'audio-ready', playback, microphone }); }
   async function ready() {
     if (!context) context = createContext();
@@ -87,6 +120,7 @@ export function createBrowserAudio({
       if (playbackGeneration !== token) return;
       playback = enabled;
       if (!enabled) stopPlayback();
+      if (enabled && nodes.size === 0) armIdleClose();
       readyState(); state();
     } catch (error) { if (playbackGeneration === token) { playback = false; readyState(); state(error.message); } }
   }
@@ -125,7 +159,9 @@ export function createBrowserAudio({
     const frame = decodeAudioPacket(buffer);
     if (!frame) return false;
     send({ type: 'audio-ack', sequence: frame.sequence });
-    if (!playback || !connected || context?.state !== 'running') return true;
+    if (!playback || !connected || !context) return true;
+    if (context.state !== 'running') { reopen(buffer); return true; }
+    cancelIdleClose();
     const now = context.currentTime;
     const delay = frame.media ? mediaBufferMillis / 1000 : .06;
     // A media burst after a radio gap must fit above the selected start buffer.
@@ -142,7 +178,7 @@ export function createBrowserAudio({
     }
     const node = context.createBufferSource(); node.buffer = audioBuffer; node.stream = frame.stream; node.media = frame.media;
     node.connect(outputNode(context)); nodes.add(node);
-    node.onended = () => { nodes.delete(node); node.disconnect(); };
+    node.onended = () => { nodes.delete(node); node.disconnect(); if (nodes.size === 0) armIdleClose(); };
     node.start(next); streams.set(frame.stream, next + count / frame.rate);
     return true;
   }
@@ -181,6 +217,8 @@ export function createBrowserAudio({
     playbackGeneration++; microphoneGeneration++; connected = false; microphone = playback = false;
     desiredPlayback = desiredMicrophone = gestureRetry = false;
     mediaBufferMillis = 300;
+    if (idleTimer !== 0) { cancel(idleTimer); idleTimer = 0; }
+    resuming = null; pending.length = 0;
     stopMicrophone(); stopPlayback();
     if (elementSink) { try { elementSink.element.pause?.(); } catch (_) {} elementSink.element.srcObject = null; elementSink = null; }
     const old = context; context = null; old?.close().catch(() => {}); state();

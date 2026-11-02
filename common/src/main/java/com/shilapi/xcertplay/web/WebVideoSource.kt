@@ -20,7 +20,7 @@ internal class WebVideoSource(val technology: StreamTechnology) : EncodedVideoSi
     }
     @Volatile var config: Config? = null
         private set
-    @Volatile private var consumer: RtcVideoStream? = null
+    @Volatile private var consumer: VideoFrameStream? = null
     @Volatile private var displayed = false
     private val recovery = ConcurrentHashMap<Int, () -> Unit>()
     private val lastRequest = AtomicLong(0)
@@ -38,7 +38,8 @@ internal class WebVideoSource(val technology: StreamTechnology) : EncodedVideoSi
         config = null
         lastConfig = null
         lastPts = null
-        if (technology != StreamTechnology.WEBRTC) return
+        // JPEG keeps no compressed-frame configuration; both live transports do.
+        if (technology == StreamTechnology.JPEG) return
         if (codec == VideoCodec.H265) {
             config = hevcConfig(type, data)
             if (config != null) lastConfig = data.copyOf()
@@ -81,18 +82,18 @@ internal class WebVideoSource(val technology: StreamTechnology) : EncodedVideoSi
         return Config(type, VideoCodec.H265, fmtp, parameters)
     }
 
-    @Synchronized fun attach(stream: RtcVideoStream, expected: Config): Boolean {
+    @Synchronized fun attach(stream: VideoFrameStream, expected: Config): Boolean {
         if (config !== expected) return false
         detach()
         consumer = stream
         return true
     }
 
-    @Synchronized fun displayed(stream: RtcVideoStream) {
+    @Synchronized fun displayed(stream: VideoFrameStream) {
         if (consumer === stream && stream.connected) displayed = true
     }
 
-    @Synchronized fun detach(stream: RtcVideoStream? = consumer) {
+    @Synchronized fun detach(stream: VideoFrameStream? = consumer) {
         if (consumer !== stream) return
         val wasDisplayed = displayed
         displayed = false

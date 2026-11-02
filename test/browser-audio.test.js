@@ -194,3 +194,101 @@ test('the media element sink plays WebAudio through a playing element for media 
   audio.close();
   assert.equal(element.paused, true);
 });
+
+function idleFixture({ useElementSink = false, idleCloseMillis = 5000 } = {}) {
+  const sources = [], controls = [], timers = new Map();
+  let nextTimer = 0;
+  const context = {
+    state: 'running', currentTime: 0,
+    destination: { label: 'raw' },
+    // suspend/resume mirror a real AudioContext: state changes only once the promise settles.
+    async suspend() { context.state = 'suspended'; },
+    async resume() { context.state = 'running'; },
+    async close() {},
+    createMediaStreamDestination: () => ({ stream: { label: 'stream' } }),
+    createBuffer(channels, count, rate) {
+      const data = Array.from({ length: channels }, () => new Float32Array(count));
+      return { duration: count / rate, getChannelData: channel => data[channel] };
+    },
+    createBufferSource() {
+      const node = { connect() {}, disconnect() {}, start(at) { this.at = at; }, stop() { this.stopped = true; } };
+      sources.push(node); return node;
+    },
+  };
+  const element = { autoplay: false, srcObject: null, played: 0, paused: false,
+    play() { this.played++; this.paused = false; return Promise.resolve(); }, pause() { this.paused = true; } };
+  const audio = createBrowserAudio({
+    send: value => controls.push(value), createContext: () => context, useElementSink,
+    createAudio: () => element, idleCloseMillis,
+    schedule(fn, delay) { const id = ++nextTimer; timers.set(id, fn); return id; },
+    cancel(id) { timers.delete(id); },
+  });
+  audio.attach();
+  audio.control({ type: 'audio-route', playback: true, microphone: false, mediaBufferMillis: 300 });
+  async function playFrame(samples, sequence, options) {
+    audio.receive(packet(new Int16Array(samples).fill(7), sequence, options));
+    await new Promise(resolve => setImmediate(resolve));
+    return sources.at(-1);
+  }
+  function expireIdle() { const entry = [...timers.entries()].pop(); assert.ok(entry, 'no idle deadline'); timers.delete(entry[0]); entry[1](); }
+  return { audio, context, sources, controls, element, timers, playFrame, expireIdle };
+}
+
+test('a silent gap releases the output and the next prompt reopens it', async () => {
+  const f = await idleFixture();
+  await new Promise(resolve => setImmediate(resolve));
+  const first = await f.playFrame(960, 1, { media: false });
+  assert.equal(first.at, 0.06);
+  // The stream ends: the output is still open, but a deadline now runs.
+  first.onended();
+  assert.equal(f.context.state, 'running');
+  f.expireIdle();
+  assert.equal(f.context.state, 'suspended');
+  // A prompt arriving after the release is acked immediately and played once the output reopens.
+  assert.equal(f.audio.receive(packet(new Int16Array(960).fill(9), 2, { media: false })), true);
+  assert.deepEqual(f.controls.filter(m => m.type === 'audio-ack').map(m => m.sequence), [1, 2]);
+  assert.equal(f.sources.length, 1, 'a closed context must not schedule frames');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.context.state, 'running');
+  assert.equal(f.sources.length, 2);
+  // The replayed prompt queues behind the 20 ms it already owned on this stream, not at zero.
+  assert.equal(f.sources.at(-1).at, 0.08);
+  // And the deadline is rearmed, not left behind from the replay.
+  f.sources.at(-1).onended();
+  assert.ok(f.timers.size > 0);
+  f.audio.close();
+});
+
+test('continuous delivery never closes the output', async () => {
+  const f = await idleFixture({ idleCloseMillis: 1000 });
+  await new Promise(resolve => setImmediate(resolve));
+  const nodes = [];
+  for (let sequence = 1; sequence <= 5; sequence++) {
+    nodes.push(await f.playFrame(960, sequence, { media: true }));
+    // Sound is still queued, so no deadline may be running and the output stays open.
+    assert.equal(f.timers.size, 0, `frame ${sequence} armed a deadline while playing`);
+    assert.equal(f.context.state, 'running');
+  }
+  // Only after the last stream ends does the countdown start, and one more gap closes the output.
+  for (const node of nodes) node.onended();
+  assert.equal(f.timers.size, 1);
+  f.expireIdle();
+  assert.equal(f.context.state, 'suspended');
+  f.audio.close();
+});
+
+test('the released output also pauses the media element that carries media keys', async () => {
+  const f = await idleFixture({ useElementSink: true });
+  await new Promise(resolve => setImmediate(resolve));
+  const first = await f.playFrame(960, 1, { media: true });
+  assert.equal(f.element.paused, false);
+  first.onended();
+  f.expireIdle();
+  assert.equal(f.element.paused, true, 'a head unit reads a playing element as a music source');
+  assert.equal(f.context.state, 'suspended');
+  f.audio.receive(packet(new Int16Array(960).fill(9), 2, { media: true }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.element.paused, false);
+  assert.equal(f.context.state, 'running');
+  f.audio.close();
+});

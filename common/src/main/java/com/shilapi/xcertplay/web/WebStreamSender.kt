@@ -17,7 +17,7 @@ internal class WebStreamSender(
     private val versionedVideo: Boolean = false,
     private val imageProtocol: Int = if (versionedVideo) 2 else 1,
 ) : Closeable {
-    enum class Control { STATUS, PHONE_CONNECT, INPUT_UNAVAILABLE, BUSY, PONG, CLOSE, RTC, MIC_CONFIG, MIC_STOP, AUDIO_STOP, AUDIO_RESET, AUDIO_ROUTE, NOW_PLAYING, MEDIA_COMMAND_RESULT }
+    enum class Control { STATUS, PHONE_CONNECT, INPUT_UNAVAILABLE, BUSY, PONG, CLOSE, RTC, VCS, MIC_CONFIG, MIC_STOP, AUDIO_STOP, AUDIO_RESET, AUDIO_ROUTE, NOW_PLAYING, MEDIA_COMMAND_RESULT }
     private data class Outgoing(val frame: WebSocketFrame, val afterSend: () -> Unit = {})
     private val lock = Any()
     private val controls = linkedMapOf<Any, Outgoing>()
@@ -35,6 +35,11 @@ internal class WebStreamSender(
     private val audio = java.util.ArrayDeque<Audio>()
     private val audioInFlight = linkedMapOf<Long, Long>()
     private var mediaBufferMillis = MediaAudioBuffer.DEFAULT_MILLIS
+    // Compressed access units of the WebSocket codec stream. Only-new drops keep the reference
+    // chain intact, exactly like the WebRTC send queue; the codec stream asks for a keyframe.
+    private data class CodecFrame(val frame: WebSocketFrame, val bytes: Int)
+    private val codec = ArrayDeque<CodecFrame>()
+    private var codecBytes = 0
 
     fun configureAudioBuffer(millis: Int) = synchronized(lock) {
         mediaBufferMillis = MediaAudioBuffer.sanitize(millis)
@@ -76,6 +81,18 @@ internal class WebStreamSender(
         scheduleLocked()
     }
     fun clearAudio() = synchronized(lock) { audio.clear(); audioInFlight.clear() }
+
+    /** One compressed access unit; false when the bounded queue is full and the frame was dropped. */
+    fun video(packet: ByteArray): Boolean = synchronized(lock) {
+        if (closed) return false
+        if (codec.size >= 6 || codecBytes + packet.size > 2 * 1024 * 1024) return false
+        codec.addLast(CodecFrame(WebSocketFrame(WebSocketFrame.OpCode.Binary, true, packet), packet.size))
+        codecBytes += packet.size
+        scheduleLocked()
+        true
+    }
+
+    fun clearVideo() = synchronized(lock) { codec.clear(); codecBytes = 0 }
     fun clearAudioStream(stream: Int) = synchronized(lock) {
         audio.removeAll {
             val bytes = it.frame.binaryPayload
@@ -138,7 +155,7 @@ internal class WebStreamSender(
 
     private fun scheduleLocked() {
         if (closed || scheduled) return
-        if (controls.isEmpty() && (audio.isEmpty() || audioInFlight.size >= 4)) {
+        if (controls.isEmpty() && (audio.isEmpty() || audioInFlight.size >= 4) && codec.isEmpty()) {
             if (nextImage() == null) return
         }
         scheduled = true
@@ -159,6 +176,10 @@ internal class WebStreamSender(
                         if (audio.isEmpty()) { scheduled = false; scheduleLocked(); return }
                         val next = audio.removeFirst()
                         audioInFlight[next.sequence] = now()
+                        Outgoing(next.frame)
+                    } else if (codec.isNotEmpty()) {
+                        val next = codec.removeFirst()
+                        codecBytes -= next.bytes
                         Outgoing(next.frame)
                     } else {
                         val frame = nextImage()
@@ -192,6 +213,7 @@ internal class WebStreamSender(
             controls.clear()
             imagesInFlight.clear()
             audio.clear(); audioInFlight.clear()
+            codec.clear(); codecBytes = 0
             // Shutdown under the lock prevents a racing event from scheduling after shutdown.
             executor.shutdownNow()
         }

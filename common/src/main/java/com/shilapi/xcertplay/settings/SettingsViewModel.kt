@@ -111,6 +111,7 @@ internal class SettingsViewModel(
                     ToggleSetting.PHONE_STATUS_BADGE to AirPlayPersistence.loadPhoneStatusBadge(app),
                     ToggleSetting.HEVC to AirPlayPersistence.loadHevcEnabled(app),
                     ToggleSetting.BLUETOOTH_AUDIO to AirPlayPersistence.loadBluetoothAudioPriority(app),
+                    ToggleSetting.BROWSER_MEDIA to AirPlayPersistence.loadBrowserMediaToPage(app),
                     ToggleSetting.RIGHT_HAND to AirPlayPersistence.loadRightHandDrive(app),
                     ToggleSetting.HTTPS to WebListenSettings.httpsEnabled(app),
                     ToggleSetting.TESLA to TeslaHttpCompatibility.config(app).enabled,
@@ -287,6 +288,12 @@ internal class SettingsViewModel(
                 ToggleSetting.BLUETOOTH_AUDIO -> {
                     AirPlayPersistence.saveBluetoothAudioPriority(app, checked)
                     SettingsEffect.Reconnect()
+                }
+                ToggleSetting.BROWSER_MEDIA -> {
+                    // The route is republished from WebSession, so the phone takes media back with its
+                    // own audio focus while the page keeps prompts; no reconnect is needed.
+                    WebSession.setBrowserMediaToPage(app, checked)
+                    SettingsEffect.None
                 }
                 ToggleSetting.RIGHT_HAND -> {
                     AirPlayPersistence.saveRightHandDrive(app, checked)
