@@ -1,0 +1,6 @@
+# 本项目固定 JDK 25：Gradle 的 daemon JVM 由 gradle/gradle-daemon-jvm.properties 指定为 25，
+# 版本不符时 Gradle 会尝试自行下载 JDK（toolchainUrl 走 foojay），因此用 mise 提供 JAVA_HOME。
+# 本机可直接把已有的 JDK 25 登记进 mise，无需下载：
+#   mise link java@25.0.3 "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+[tools]
+java = "25"
