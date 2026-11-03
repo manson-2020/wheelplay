@@ -7,8 +7,12 @@ import androidx.compose.runtime.Composable
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.network.TeslaHttpMode
 
+/**
+ * Optional routing proxy for browsers that refuse private network addresses: a rootless VPN or a
+ * rooted hotspot route share the same local listener under a second access address.
+ */
 @Composable
-internal fun TeslaSettingsScreen(state: SettingsState, actions: SettingsActions) {
+internal fun RoutingProxySettings(state: SettingsState, actions: SettingsActions) {
     val config = state.tesla
     val enabled = !state.runtime.webBusy && !state.runtime.awaitingVpnConsent
     SettingsChoice(
@@ -19,7 +23,7 @@ internal fun TeslaSettingsScreen(state: SettingsState, actions: SettingsActions)
         TeslaHttpMode.entries.map { settingsString(it.labelRes) },
         enabled,
     )
-    SettingsDescription(R.string.settings_tesla_description)
+    SettingsDescription(R.string.settings_routing_proxy_description)
     if (config.mode == TeslaHttpMode.VPN) {
         SettingsToggle(
             state,

@@ -124,8 +124,7 @@ internal fun SettingsScreen(
                                 SettingsCategory.AUDIO -> AudioSettingsScreen(state, actions)
                                 SettingsCategory.VEHICLE -> VehicleSettingsScreen(state, actions)
                                 SettingsCategory.BROWSER -> BrowserSettingsScreen(state, actions)
-                                SettingsCategory.WEB -> WebSettingsScreen(state, actions)
-                                SettingsCategory.TESLA -> TeslaSettingsScreen(state, actions)
+                                SettingsCategory.NETWORK -> NetworkSettingsScreen(state, actions)
                                 SettingsCategory.AUTHENTICATION ->
                                     AuthenticationSettingsScreen(state, actions)
                                 SettingsCategory.HELP -> HelpSettingsScreen(state, actions)

@@ -12,7 +12,7 @@
 均保持 JPEG。探测不依赖 User-Agent、Canvas、WebCodecs 或 HTTPS；成功后发送
 `{"type":"image-format","format":"webp"}`。配对和连接无需等待探测完成。
 
-「设置 → 画面与串流」可选择 JPEG / WebP，并输入 1–100 的图片质量，默认 WebP、75。
+「设置 → 画面与串流」可选择 JPEG / WebP，并输入 1–100 的图片质量，默认 JPEG、90。
 选择 JPEG 时始终编码 JPEG；选择 WebP 时仍必须通过浏览器能力协商，旧客户端、不支持或
 已回退的浏览器继续使用 JPEG。设置保存到 App，重启后保留，取消输入不改变设置；非法
 质量输入被拒绝，未知格式或超出范围的已存质量使用默认值。

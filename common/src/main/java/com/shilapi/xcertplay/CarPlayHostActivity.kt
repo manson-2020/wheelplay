@@ -312,6 +312,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var displayDiagnosticAttempt: String? = null
     private var hevcEnabled = true
     private var hevcSoftwareDecoderEnabled = false
+    private var codecDowngradeScheduled = false
     private var advancedAudioChannelMappingSupported = false
     private var advancedAudioChannelMapping = false
     private var debugLogsEnabled = false
@@ -447,6 +448,9 @@ class CarPlayHostActivity : ComponentActivity() {
         activeDisplaySize = defaultDisplaySize()
         WebSession.setBrowserViewportListener { width, height ->
             mainHandler.post { scheduleBrowserDisplaySize(width, height) }
+        }
+        WebSession.setHevcUnusableHandler { source ->
+            mainHandler.post { onHevcUnusable(source) }
         }
         showSystemBars()
         onBackPressedDispatcher.addCallback(
@@ -727,6 +731,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onDestroy() {
         WebSession.setBrowserViewportListener(null)
+        WebSession.setHevcUnusableHandler(null)
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.removeCallbacks(expireOldLogLines)
         currentSurface?.let { surface ->
@@ -1136,6 +1141,9 @@ class CarPlayHostActivity : ComponentActivity() {
             setOnCheckedChangeListener { _, checked ->
                 if (hevcEnabled == checked) return@setOnCheckedChangeListener
                 hevcEnabled = checked
+                // Touching the switch is the way back up the chain: the next setup advertises HEVC
+                // again instead of remembering that the last renderer refused it.
+                AirPlayPersistence.saveHevcUnusable(this@CarPlayHostActivity, false)
                 appendLog(
                     "HEVC (H.265) ${if (hevcEnabled) "enabled" else "disabled"}; applies when settings close",
                 )
@@ -2499,10 +2507,17 @@ class CarPlayHostActivity : ComponentActivity() {
             )
             getString(UiR.string.host_negotiated_resolution, native.width, native.height, negotiated.widthPixels, negotiated.heightPixels)
         }
-        val transport = if (!hevcEnabled) {
-            "H.264"
-        } else {
-            getString(UiR.string.host_hevc_decoder_type, if (hevcSoftwareDecoderEnabled) getString(UiR.string.ui_software) else getString(UiR.string.ui_hardware))
+        val transport = when {
+            !hevcEnabled -> "H.264"
+            codecStreamNeedsAvc() -> "H.264"
+            AirPlayPersistence.loadHevcUnusable(this) ->
+                getString(UiR.string.host_hevc_unavailable_using_h_264)
+            else ->
+                getString(
+                    UiR.string.host_hevc_decoder_type,
+                    if (hevcSoftwareDecoderEnabled) getString(UiR.string.ui_software)
+                    else getString(UiR.string.ui_hardware),
+                )
         }
         resolutionPreviewView?.text = buildString {
             append(resolution).append('\n')
@@ -2544,7 +2559,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private data class CanvasSupport(val supported: Boolean, val reason: String, val details: String)
 
     private fun largerCanvasSupport(display: AirPlayDisplayConfig): CanvasSupport = try {
-        val mime = if (hevcEnabled) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+        val mime = if (effectiveHevc()) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
         // Match MediaCodec.createDecoderByType's first suitable decoder; do not silently force
         // an enlarged stream through a software decoder on a slower head unit.
         val decoder = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
@@ -2633,7 +2648,7 @@ class CarPlayHostActivity : ComponentActivity() {
             sourceVersion = "950.7.1",
             main = display,
             rightHandDrive = rightHandDrive,
-            hevc = hevcEnabled && !codecStreamNeedsAvc(),
+            hevc = effectiveHevc(),
             microphone = AirPlayPersistence.loadMicrophoneSource(this) != CarPlayMicrophoneSource.DISABLED,
             microphoneOpus = com.shilapi.xcertplay.media.OpusEncoderSupport.isAvailable(),
             manufacturer = normalizedManufacturer(),
@@ -2795,22 +2810,60 @@ class CarPlayHostActivity : ComponentActivity() {
         model.trim().ifBlank { AirPlayPersistence.DEFAULT_MODEL }
 
     /**
-     * Bluetooth priority no longer downgrades the image transport: the web server then offers the
-     * WebSocket codec stream instead of WebRTC (the conflict in docs/BROWSER_AUDIO.md follows the
-     * WebRTC media transport itself, not any audio the page plays), and JPEG remains the stream's
-     * own fallback when the browser cannot decode.
+     * The chosen channel is offered to the page as-is. WebRTC and WebCodecs both carry compressed
+     * video and fall back to images on their own when the browser cannot decode; the channel choice
+     * itself no longer depends on where the audio goes (the Bluetooth conflict in
+     * docs/BROWSER_AUDIO.md follows the WebRTC media transport, not any audio the page plays).
      */
     private fun effectiveStreamTechnology(): com.shilapi.xcertplay.web.StreamTechnology = streamTechnology
 
-    // "Bluetooth audio priority" routes the browser to the WebSocket codec stream. That stream can
-    // carry HEVC, but only when the browser decodes it: the page reports its own WebCodecs support
-    // when it starts the stream and this phone remembers the answer. Until a browser has proved it
-    // (or when the one that did was a laptop rather than this head unit) the iPhone is asked for
-    // H.264, because a stream the car cannot decode would block the low-latency path entirely.
+    /**
+     * The WebCodecs channel carries HEVC too, but only when the browser decodes it: the page
+     * reports its own WebCodecs support when it starts the channel and this phone remembers the
+     * answer. Until a browser has proved it (or when the one that did was a laptop rather than this
+     * head unit) the iPhone is asked for H.264, because a stream the car cannot decode would leave
+     * the session on the image channel.
+     */
     private fun codecStreamNeedsAvc(): Boolean =
-        AirPlayPersistence.loadBluetoothAudioPriority(this) &&
-            !AirPlayPersistence.loadBrowserAudioPlayback(this) &&
+        AirPlayPersistence.loadStreamTechnology(this) ==
+            com.shilapi.xcertplay.web.StreamTechnology.WEBCODECS &&
             !AirPlayPersistence.loadBrowserHevc(this)
+
+    /**
+     * HEVC is offered only while the switch is on and no renderer has refused it. The iPhone picks
+     * the codec once per setup, so this is the single knob the fallback chain's first step uses.
+     */
+    private fun effectiveHevc(): Boolean =
+        hevcEnabled && !AirPlayPersistence.loadHevcUnusable(this) && !codecStreamNeedsAvc()
+
+    /**
+     * First step of the chain: HEVC was advertised this session and the renderer refused it (the
+     * Android decoder could not configure it, or the page reported `codec-unsupported`). A new
+     * setup is the only thing that can change the codec, so remember the answer and rebuild the
+     * session once; the iPhone then sends H.264. If H.264 fails as well the browser keeps the image
+     * transport on its own, and WebP still falls back to JPEG inside it - no further negotiation
+     * exists. The HEVC switch re-arms the attempt after the user changes a head unit or browser.
+     */
+    private fun onHevcUnusable(source: String) {
+        if (!hevcEnabled || AirPlayPersistence.loadHevcUnusable(this)) return
+        AirPlayPersistence.saveHevcUnusable(this, true)
+        appendLog("HEVC not decodable ($source); renegotiating H.264")
+        updateResolutionMenu()
+        // A pending reconnect already rebuilds the session and will pick the remembered answer up
+        // on its own; never race it with a second teardown.
+        if (codecDowngradeScheduled || reconnectScheduled || shuttingDown.get() || menuOpen ||
+            controller == null
+        ) {
+            return
+        }
+        codecDowngradeScheduled = true
+        mainHandler.postDelayed({
+            codecDowngradeScheduled = false
+            if (!shuttingDown.get() && !menuOpen && !reconnectScheduled && controller != null) {
+                restartCarPlay("HEVC not decodable ($source); rebuilding with H.264")
+            }
+        }, CODEC_DOWNGRADE_DELAY_MILLIS)
+    }
 
     private fun createMediaSink(
         videoWidth: Int,
@@ -2840,6 +2893,11 @@ class CarPlayHostActivity : ComponentActivity() {
             videoWidth = videoWidth,
             videoHeight = videoHeight,
             preferSoftwareHevcDecoder = hevcSoftwareDecoderEnabled,
+            onVideoCodecFailure = { codec ->
+                if (codec == com.shilapi.xcertplay.media.VideoCodec.H265) {
+                    mainHandler.post { onHevcUnusable("android decoder") }
+                }
+            },
             advancedAudioChannelMapping = advancedAudioChannelMapping,
             onScreenStreamActiveChanged = { type, active ->
                 onScreenStreamStateChanged(controllerGeneration, type, active)
@@ -3600,6 +3658,8 @@ class CarPlayHostActivity : ComponentActivity() {
         const val DISPLAY_CHANGE_DEBOUNCE_MILLIS = 500L
         const val BROWSER_DISPLAY_CHANGE_DEBOUNCE_MILLIS = 900L
         const val RECONNECT_DELAY_MILLIS = 2_000L
+        // Let the failed attempt finish tearing down before the H.264 setup replaces it.
+        const val CODEC_DOWNGRADE_DELAY_MILLIS = 1_500L
         const val IAP_TUNNEL_RECONNECT_DELAY_MILLIS = 15_000L
         const val CONTROLLER_CLOSE_TIMEOUT_MILLIS = 4_000L
         const val AUDIO_CAPTURE_MARKER = "audio-capture.enabled"

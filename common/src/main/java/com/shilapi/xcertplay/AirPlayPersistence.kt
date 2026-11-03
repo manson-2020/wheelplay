@@ -37,8 +37,11 @@ object AirPlayPersistence {
     private const val KEY_DISPLAY_SCALE_TENTHS = "display_scale_tenths"
     private const val KEY_UI_SCALE_PERCENT = "ui_scale_percent"
     private const val KEY_HEVC_ENABLED = "hevc_enabled"
-    private const val KEY_BLUETOOTH_AUDIO_PRIORITY = "bluetooth_audio_priority"
     private const val KEY_BROWSER_HEVC = "browser_hevc"
+    // HEVC was advertised and the renderer then refused the stream (Android decoder or the
+    // head-unit browser). Session setup is the only point that can pick a codec, so the answer is
+    // remembered until the user re-arms HEVC from the switch.
+    private const val KEY_HEVC_UNUSABLE = "hevc_unusable"
     private const val KEY_HEVC_SOFTWARE_DECODER = "hevc_software_decoder"
     private const val KEY_ADVANCED_AUDIO_CHANNEL_MAPPING = "advanced_audio_channel_mapping"
     private const val KEY_WIRELESS_ENABLED = "wireless_enabled"
@@ -228,7 +231,7 @@ object AirPlayPersistence {
 
     fun loadHevcEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_HEVC_ENABLED, false)
+            .getBoolean(KEY_HEVC_ENABLED, true)
 
     fun loadUiScalePercent(context: Context): Int = CarPlayUiScale.sanitize(
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -246,14 +249,19 @@ object AirPlayPersistence {
             .apply()
     }
 
-    /** Head units that drop Bluetooth audio while the browser plays media need the image path. */
-    fun loadBluetoothAudioPriority(context: Context): Boolean =
+    /**
+     * HEVC was offered to this renderer and it could not decode the stream. The iPhone picks the
+     * codec once per session, so the only usable answer is to stop advertising HEVC and let the
+     * next setup negotiate H.264 - which is exactly the first step of the fallback chain
+     * (HEVC -> H.264 -> images -> JPEG). Cleared when the user touches the HEVC switch.
+     */
+    fun loadHevcUnusable(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_BLUETOOTH_AUDIO_PRIORITY, false)
+            .getBoolean(KEY_HEVC_UNUSABLE, false)
 
-    fun saveBluetoothAudioPriority(context: Context, enabled: Boolean) {
+    fun saveHevcUnusable(context: Context, unusable: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean(KEY_BLUETOOTH_AUDIO_PRIORITY, enabled)
+            .putBoolean(KEY_HEVC_UNUSABLE, unusable)
             .apply()
     }
 
@@ -456,7 +464,7 @@ object AirPlayPersistence {
 
     fun loadAutoStartOnBoot(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_AUTO_START_ON_BOOT, false)
+            .getBoolean(KEY_AUTO_START_ON_BOOT, true)
 
     fun saveAutoStartOnBoot(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -512,13 +520,20 @@ object AirPlayPersistence {
 
     fun loadFps(context: Context): Int = AirPlayDisplaySettings.sanitizeFps(
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getInt(KEY_FPS, 30),
+            .getInt(KEY_FPS, AirPlayDisplaySettings.DEFAULT_FPS),
     )
 
+    /**
+     * The connection the page should use, WebCodecs by default: it reaches the negotiated frame
+     * rate without holding the head unit's Bluetooth audio channel. A build that still had the
+     * "Prefer Bluetooth audio" switch only ever turned that switch into the same channel, so
+     * installations that never picked a technology explicitly land there as well.
+     */
     fun loadStreamTechnology(context: Context): com.shilapi.xcertplay.web.StreamTechnology {
-        val value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_STREAM_TECHNOLOGY, null)
+        val value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_STREAM_TECHNOLOGY, null)
         return com.shilapi.xcertplay.web.StreamTechnology.entries.firstOrNull { it.name == value }
-            ?: com.shilapi.xcertplay.web.StreamTechnology.WEBRTC
+            ?: com.shilapi.xcertplay.web.StreamTechnology.WEBCODECS
     }
 
     fun saveStreamTechnology(context: Context, value: com.shilapi.xcertplay.web.StreamTechnology) {
@@ -534,7 +549,7 @@ object AirPlayPersistence {
     fun loadImageFormat(context: Context): com.shilapi.xcertplay.web.ImageFormat {
         val value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_IMAGE_FORMAT, null)
         return com.shilapi.xcertplay.web.ImageFormat.entries.firstOrNull { it.name == value }
-            ?: com.shilapi.xcertplay.web.ImageFormat.WEBP
+            ?: com.shilapi.xcertplay.web.ImageFormat.JPEG
     }
 
     fun saveImageFormat(context: Context, value: com.shilapi.xcertplay.web.ImageFormat) {
@@ -638,7 +653,7 @@ object AirPlayPersistence {
     /** Opt-in: the head-unit corner badge showing this phone's battery and uplink. */
     fun loadPhoneStatusBadge(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_PHONE_STATUS_BADGE, false)
+            .getBoolean(KEY_PHONE_STATUS_BADGE, true)
 
     fun savePhoneStatusBadge(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

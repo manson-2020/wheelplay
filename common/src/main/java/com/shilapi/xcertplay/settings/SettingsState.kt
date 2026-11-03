@@ -18,8 +18,7 @@ internal enum class SettingsCategory(
     AUDIO(R.string.settings_audio, R.string.settings_audio_summary),
     VEHICLE(R.string.settings_vehicle, R.string.settings_vehicle_summary),
     BROWSER(R.string.settings_browser, R.string.settings_browser_summary),
-    WEB(R.string.settings_web, R.string.settings_web_summary),
-    TESLA(R.string.settings_tesla, R.string.settings_tesla_summary),
+    NETWORK(R.string.settings_network_access, R.string.settings_network_access_summary),
     AUTHENTICATION(R.string.settings_authentication, R.string.settings_authentication_summary),
     HELP(R.string.settings_help, R.string.settings_help_summary),
 }
@@ -49,7 +48,6 @@ internal enum class ToggleSetting {
     ADAPTIVE_SIZE,
     PHONE_STATUS_BADGE,
     HEVC,
-    BLUETOOTH_AUDIO,
     BROWSER_MEDIA,
     RIGHT_HAND,
     HTTPS,

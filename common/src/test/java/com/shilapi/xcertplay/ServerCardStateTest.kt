@@ -42,6 +42,17 @@ class ServerCardStateTest {
         MfiAssetStore(RuntimeEnvironment.getApplication().noBackupFilesDir).installFiles(
             { identity.key.inputStream() }, { identity.certificate.inputStream() })
         RuntimeEnvironment.getApplication().getSharedPreferences("diplay", 0).edit().clear().commit()
+        // These cases drive the manual controls; auto-connect is the shipped default and would
+        // start a session as soon as a phone is saved.
+        DiPlayPreferences.saveAutoConnect(RuntimeEnvironment.getApplication(), false)
+        // The routing proxy ships enabled; its VPN binding is out of scope for these card cases.
+        com.shilapi.xcertplay.web.TeslaHttpCompatibility.save(
+            RuntimeEnvironment.getApplication(),
+            com.shilapi.xcertplay.network.TeslaHttpConfig(
+                enabled = false,
+                mode = com.shilapi.xcertplay.network.TeslaHttpMode.VPN,
+            ),
+        )
     }
 
     @After fun cleanup() {

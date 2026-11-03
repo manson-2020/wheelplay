@@ -26,7 +26,7 @@ Video performance also depends on source output, network quality, Android perfor
 
 Normal local network connections and the web service do not require root.
 
-For browsers that restrict access to private network addresses, the app offers experimental Tesla compatibility mode. The root-free VPN option needs Android VPN permission; hotspot routing needs root. Both require testing on your device. See the [compatibility guide](/en/docs/tesla/).
+For browsers that restrict access to private network addresses, the app offers an experimental routing proxy (formerly Tesla compatibility). The root-free VPN option needs Android VPN permission; hotspot routing needs root. Both require testing on your device. See the [compatibility guide](/en/docs/tesla/).
 
 ## Why do I need authentication assets?
 

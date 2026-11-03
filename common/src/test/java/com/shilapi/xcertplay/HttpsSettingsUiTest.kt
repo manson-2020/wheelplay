@@ -3,6 +3,7 @@ package com.shilapi.xcertplay
 import android.content.Intent
 import androidx.compose.ui.test.*
 import com.shilapi.xcertplay.network.TeslaHttpConfig
+import com.shilapi.xcertplay.network.TeslaHttpMode
 import com.shilapi.xcertplay.web.RootAccess
 import com.shilapi.xcertplay.web.TeslaHttpCompatibility
 import com.shilapi.xcertplay.web.WebListenSettings
@@ -34,10 +35,15 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
         } finally {
             RootAccess.authorize = original
         }
+        // These cases cover the rooted route; the shipped default is the rootless VPN.
+        TeslaHttpCompatibility.save(
+            RuntimeEnvironment.getApplication(),
+            TeslaHttpConfig(enabled = false, mode = TeslaHttpMode.ROOT),
+        )
     }
 
     private fun openSettings(activity: DiPlayActivity) =
-        SettingsNavigation.open(activity, "Tesla 兼容（实验）", compose)
+        SettingsNavigation.open(activity, "网络与访问", compose)
 
     private fun requestRoot() {
         compose.onNodeWithText("请求 Root 权限").performScrollTo().performClick()
@@ -67,7 +73,7 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
         }
         TeslaHttpCompatibility.save(
             RuntimeEnvironment.getApplication(),
-            TeslaHttpConfig(enabled = true),
+            TeslaHttpConfig(enabled = true, mode = TeslaHttpMode.ROOT),
         )
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         try {
@@ -75,7 +81,8 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
             assertTrue(entered.await(2, TimeUnit.SECONDS))
             compose.onNodeWithText("请求 Root 权限").assertIsNotEnabled()
             assertFalse(hasTag("text:HTTP_MAPPING"))
-            assertFalse(hasTag("text:HTTP_PORT"))
+            // The web listeners stay usable while the root check is still running.
+            assertTrue(hasTag("text:HTTP_PORT"))
             release.countDown()
             waitForUi { RootAccess.granted && hasTag("text:HTTP_MAPPING") }
             RootAccess.checkOnStartup()
@@ -101,7 +108,7 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
         }
         TeslaHttpCompatibility.save(
             RuntimeEnvironment.getApplication(),
-            TeslaHttpConfig(enabled = true),
+            TeslaHttpConfig(enabled = true, mode = TeslaHttpMode.ROOT),
         )
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         try {
@@ -131,8 +138,12 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
             assertEquals(0, requests)
             assertFalse(hasTag("text:HTTP_MAPPING"))
             assertFalse(hasTag("text:TESLA_ADDRESS"))
+            // The page opens on the listeners, so the proxy group sits below them: scroll the root
+            // request into view first, otherwise both rows clip to the same viewport edge.
+            val root =
+                compose.onNodeWithText("请求 Root 权限").performScrollTo()
+                    .fetchSemanticsNode().boundsInRoot
             val mode = compose.onNodeWithTag("choice:TESLA_MODE").fetchSemanticsNode().boundsInRoot
-            val root = compose.onNodeWithText("请求 Root 权限").fetchSemanticsNode().boundsInRoot
             assertTrue(mode.top < root.top)
             requestRoot()
             waitForUi { RootAccess.granted }
@@ -161,7 +172,6 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
             }
             assertFalse(hasTag("text:HTTP_MAPPING"))
             assertFalse(hasTag("text:TESLA_ADDRESS"))
-            SettingsNavigation.open(controller.get(), "Web 服务", compose)
             compose.onNodeWithTag("text:HTTP_PORT").assertExists()
             compose.onNodeWithTag("text:HOSTNAME").assertExists()
             compose.onNodeWithTag("text:HTTPS_PORT").assertExists()
@@ -178,7 +188,7 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         try {
             val activity = controller.get()
-            SettingsNavigation.open(activity, "Web 服务", compose)
+            SettingsNavigation.open(activity, "网络与访问", compose)
             for ((type, title) in listOf("PEM" to "选择 PEM 证书与私钥", "PKCS12" to "选择 PKCS#12 文件")) {
                 clickTag("certificate:$type")
                 compose.onNodeWithText(title).performScrollTo().performClick()
@@ -199,8 +209,7 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         try {
             val activity = controller.get()
-            SettingsNavigation.open(activity, "Web 服务", compose)
-            compose.onNodeWithText("请求 Root 权限").assertDoesNotExist()
+            SettingsNavigation.open(activity, "网络与访问", compose)
             clickTag("toggle:HTTPS")
             // The worker saves the preference before posting the UI refresh. Wait for the
             // rendered result too, so a slow worker cannot race the visibility assertions.
@@ -223,7 +232,7 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
     fun httpsPortFieldShowsItsPersistedDefaultAndRejectsInvalidInput() {
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         try {
-            SettingsNavigation.open(controller.get(), "Web 服务", compose)
+            SettingsNavigation.open(controller.get(), "网络与访问", compose)
             clickTag("text:HTTPS_PORT")
             compose.onNodeWithTag("settings:text-input").assertTextContains("8443")
             input("443")
@@ -238,18 +247,17 @@ class HttpsSettingsUiTest : ComposeSettingsTest() {
     }
 
     @Test
-    fun renderWebAndTeslaSettingsBeforeAndAfterRootGrant() {
+    fun renderNetworkSettingsBeforeAndAfterRootGrant() {
         val original = RootAccess.authorize
         RootAccess.authorize = {}
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         try {
             openSettings(controller.get())
-            captureSettings(controller.get(), "tesla-without-root")
+            captureSettings(controller.get(), "network-without-root")
             requestRoot()
             waitForUi { RootAccess.granted }
-            captureSettings(controller.get(), "tesla-with-root")
-            SettingsNavigation.open(controller.get(), "Web 服务", compose)
-            captureSettings(controller.get(), "web-service")
+            compose.onNodeWithTag("text:HTTP_MAPPING").performScrollTo()
+            captureSettings(controller.get(), "network-with-root")
         } finally {
             RootAccess.authorize = original
             controller.pause().stop().destroy()

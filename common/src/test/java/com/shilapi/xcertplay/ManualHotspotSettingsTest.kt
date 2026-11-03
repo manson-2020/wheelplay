@@ -29,6 +29,16 @@ class ManualHotspotSettingsTest : ComposeSettingsTest() {
     }
 
     private fun withSettings(block: () -> Unit) {
+        // Auto-connect ships enabled; these cases exercise the wireless switch on its own.
+        DiPlayPreferences.saveAutoConnect(context, false)
+        // The routing proxy ships enabled; its VPN binding is out of scope for these hotspot cases.
+        com.shilapi.xcertplay.web.TeslaHttpCompatibility.save(
+            context,
+            com.shilapi.xcertplay.network.TeslaHttpConfig(
+                enabled = false,
+                mode = com.shilapi.xcertplay.network.TeslaHttpMode.VPN,
+            ),
+        )
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         try {
             SettingsNavigation.open(controller.get(), "iPhone 连接", compose)

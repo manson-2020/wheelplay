@@ -48,7 +48,7 @@ class TeslaVpnSettingsUiTest : ComposeSettingsTest() {
     private fun all(activity: DiPlayActivity) = views(activity.window.decorView)
 
     private fun openSettings(activity: DiPlayActivity) {
-        SettingsNavigation.open(activity, "Tesla 兼容（实验）", compose)
+        SettingsNavigation.open(activity, "网络与访问", compose)
     }
 
     private fun changeMode(index: Int) {
@@ -69,6 +69,12 @@ class TeslaVpnSettingsUiTest : ComposeSettingsTest() {
             rootRequests++
             throw java.io.IOException("No root")
         }
+        // Start from a switched-off VPN route so the enable/deny flow is the one under test; the
+        // shipped default (enabled) is covered by freshInstallStartsWithTheVpnRouteEnabled.
+        TeslaHttpCompatibility.save(
+            RuntimeEnvironment.getApplication(),
+            TeslaHttpConfig(enabled = false, mode = TeslaHttpMode.VPN),
+        )
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         val activity = controller.get()
         try {
@@ -112,5 +118,14 @@ class TeslaVpnSettingsUiTest : ComposeSettingsTest() {
             controller.pause().stop().destroy()
             WebSession.stop()
         }
+    }
+
+    @Test
+    fun freshInstallStartsWithTheVpnRouteEnabled() {
+        val context = RuntimeEnvironment.getApplication()
+        assertEquals(
+            TeslaHttpConfig(enabled = true, mode = TeslaHttpMode.VPN),
+            TeslaHttpCompatibility.config(context),
+        )
     }
 }

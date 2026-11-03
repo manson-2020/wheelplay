@@ -117,6 +117,7 @@ class LanWebServerTest {
 
     @Test fun changingHttpPortPreservesMediaPairingAndUsesSavedPortOnRestart() {
         val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val routing = TeslaHttpCompatibility.config(context)
         WebSession.start(context)
         try {
             val oldCode = WebSession.code
@@ -128,7 +129,7 @@ class LanWebServerTest {
             assertNull(WebSession.setHttpPort(context, port))
             assertEquals(port, WebSession.httpPort)
             assertEquals(port, WebListenSettings.httpPort(context))
-            assertFalse(TeslaHttpCompatibility.config(context).enabled)
+            assertEquals(routing, TeslaHttpCompatibility.config(context))
             assertEquals(oldCode, WebSession.code)
             assertSame(oldFrame, WebSession.frame)
             assertTrue(URL("http://127.0.0.1:$port/").readText().contains("设备上的六位配对码"))
@@ -251,7 +252,10 @@ class LanWebServerTest {
     }
 
     @Test fun v3NegotiatesWebpPipelinesFramesAndRequiresExactAcksBeforeFallingBackToJpeg() {
-        WebSession.start(org.robolectric.RuntimeEnvironment.getApplication())
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        // The shipped default is JPEG; opt into WebP the way the settings page does.
+        com.shilapi.xcertplay.AirPlayPersistence.saveImageFormat(context, ImageFormat.WEBP)
+        WebSession.start(context)
         try {
             handshake(WebSession.code, media = 2, images = 3).use { client ->
                 assertTrue(readHeaders(client).startsWith("HTTP/1.1 101"))
@@ -342,7 +346,10 @@ class LanWebServerTest {
     }
 
     @Test fun retryAvailabilityAndExplicitStartsHonorTheSameCooldownAndConfigurationReset() {
-        WebSession.start(org.robolectric.RuntimeEnvironment.getApplication())
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        // The shipped default is the WebCodecs channel, which deliberately disables rtcAvailable.
+        com.shilapi.xcertplay.AirPlayPersistence.saveStreamTechnology(context, StreamTechnology.WEBRTC)
+        WebSession.start(context)
         try {
             handshake(WebSession.code, media = 2).use { client ->
                 assertTrue(readHeaders(client).startsWith("HTTP/1.1 101"))

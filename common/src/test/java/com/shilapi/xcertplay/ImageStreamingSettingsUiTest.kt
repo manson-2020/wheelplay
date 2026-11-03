@@ -22,7 +22,7 @@ class ImageStreamingSettingsUiTest : ComposeSettingsTest() {
             SettingsNavigation.open(controller.get(), "画面与串流", compose)
             clickTag("choice:IMAGE_FORMAT"); chooseOption(0)
             assertEquals(ImageFormat.JPEG, AirPlayPersistence.loadImageFormat(app))
-            compose.onNodeWithTag("slider:image-quality:value").performScrollTo().assertTextEquals("75")
+            compose.onNodeWithTag("slider:image-quality:value").performScrollTo().assertTextEquals("90")
             setSlider("slider:image-quality", 6f)
             assertEquals(35, AirPlayPersistence.loadImageQuality(app))
             assertEquals(ImageEncodingOptions(ImageFormat.JPEG, 35), AirPlayPersistence.imageEncoding(app, ImageFormat.WEBP))

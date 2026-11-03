@@ -171,7 +171,7 @@
     <string name="ui_collapsed">Collapsed</string>
     <string name="ui_start">Start</string>
     <string name="ui_settings">Settings</string>
-    <string name="ui_tesla_compatibility_experimental">Tesla compatibility (experimental)</string>
+    <string name="ui_routing_proxy_address">Routing proxy</string>
     <string name="ui_ethernet">Ethernet</string>
     <string name="ui_hotspot">Hotspot</string>
     <string name="ui_usb_network">USB network</string>
@@ -221,8 +221,9 @@
     <string name="ui_4_seconds_fast_fallback">4 seconds · Fast fallback</string>
     <string name="ui_10_seconds_default">10 seconds · Default</string>
     <string name="ui_30_seconds_keep_webrtc_longer">30 seconds · Keep WebRTC longer</string>
-    <string name="ui_webrtc_video_passthrough_automatic_fallback">WebRTC video passthrough (automatic fallback)</string>
-    <string name="ui_jpeg_compatibility_mode">Images (compatibility mode)</string>
+    <string name="ui_stream_webrtc">WebRTC video passthrough</string>
+    <string name="ui_stream_webcodecs">WebCodecs video channel (recommended)</string>
+    <string name="ui_stream_images">Images (compatibility mode)</string>
     <string name="ui_start_the_web_listener_first">Start the Web listener first</string>
     <string name="ui_the_shared_ip_matches_the_hotspot_gateway_choose_another">The shared IP matches the hotspot gateway. Choose another address</string>
     <string name="ui_request_root_access_first">Request root access first</string>
@@ -308,7 +309,7 @@
     <string name="host_longest_height">Longest height</string>
     <string name="host_physical_length">Physical length</string>
     <string name="host_streaming_technology">Streaming technology</string>
-    <string name="host_webrtc_supports_h_264_hevc_passthrough_and_falls_back">WebRTC supports H.264 / HEVC passthrough and falls back to image streaming (JPEG / WebP) when unsupported by the browser. Set Frame rate to 60 for 60 fps. Changes take effect after closing settings.</string>
+    <string name="host_webrtc_supports_h_264_hevc_passthrough_and_falls_back">WebRTC, WebCodecs and images all carry the same H.264 / HEVC picture. WebRTC has the lowest latency but some head units drop Bluetooth audio while it runs; WebCodecs keeps Bluetooth audio and still reaches 60 fps; images is the most compatible at about 15 fps. Set Frame rate to 60 for 60 fps. Changes take effect after closing settings.</string>
     <string name="host_hevc_h_265">HEVC (H.265)</string>
     <string name="host_hevc_h_265_video_transport">HEVC H.265 video transport</string>
     <string name="host_hevc_software_decoder">HEVC software decoder</string>
@@ -429,6 +430,7 @@
     <string name="ui_address_must_start_with_http_or_https_token_is">Address must start with http:// or https://. Token is optional and sent as an Authorization bearer token.</string>
     <string name="ui_android_13_precise_location_enables_hotspot_channel_detection_if">Android 13+: precise location enables hotspot channel detection. If skipped, the connection continues with Auto. This scan does not record or upload location; you can enable access later in Android app permissions.</string>
     <string name="host_hevc_decoder_type">HEVC (H.265, %1$s)</string>
+    <string name="host_hevc_unavailable_using_h_264">H.264 (HEVC could not be decoded, downgraded automatically)</string>
     <string name="ui_software">software</string>
     <string name="ui_hardware">hardware</string>
     <string name="ui_widest_width">widest width</string>
@@ -485,7 +487,7 @@
     <string name="web_connected_waiting_for_video">Connected · Waiting for video</string>
     <string name="web_waiting_for_iphone_video">Waiting for iPhone video…</string>
     <string name="web_fallback">" · Fallback"</string>
-    <string name="web_disable_hevc_to_use_webrtc_on_this_head_unit">Turn off HEVC in WheelPlay settings to use WebRTC on this head unit</string>
+    <string name="web_disable_hevc_to_use_webrtc_on_this_head_unit">This head unit cannot decode HEVC; WheelPlay is reconnecting with H.264</string>
     <string name="web_transport_touch_connected">%1$s%2$s · Touch connected</string>
     <string name="web_waiting_for_recovery">" · Waiting for recovery"</string>
     <string name="web_connected_waiting_for_iphone_video">Connected · Waiting for iPhone video</string>

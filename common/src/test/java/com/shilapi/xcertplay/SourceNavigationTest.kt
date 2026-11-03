@@ -16,7 +16,10 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.card.MaterialCardView
+import com.shilapi.xcertplay.network.TeslaHttpConfig
+import com.shilapi.xcertplay.network.TeslaHttpMode
 import com.shilapi.xcertplay.projection.*
+import com.shilapi.xcertplay.web.TeslaHttpCompatibility
 import com.shilapi.xcertplay.web.WebSession
 import org.junit.Assert.*
 import org.junit.Before
@@ -39,6 +42,12 @@ class SourceNavigationTest {
         val identity = SyntheticMfiIdentity.create()
         MfiAssetStore(context.noBackupFilesDir).installFiles({ identity.key.inputStream() }, { identity.certificate.inputStream() })
         DiPlayPreferences.saveAutoConnect(context, false)
+        // The shipped default enables the routing proxy; its VPN binding is out of scope for the
+        // source navigation cases, so keep it switched off here.
+        TeslaHttpCompatibility.save(
+            context,
+            TeslaHttpConfig(enabled = false, mode = TeslaHttpMode.VPN),
+        )
     }
 
     private fun views(view: View): List<View> = listOf(view) +

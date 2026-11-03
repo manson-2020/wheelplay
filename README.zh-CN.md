@@ -63,7 +63,7 @@
 
 - 浏览器麦克风和 GPS 需要受信任的 HTTPS 及浏览器授权。CarPlay 默认使用 Android 音频／麦克风；浏览器 GPS 每次打开页面默认关闭。配置见[音频与 HTTPS 指南](docs/BROWSER_AUDIO.md)。
 - 实际帧率和稳定性取决于手机、宿主、浏览器、网络及 Android 后台限制。WebRTC 使用局域网 UDP，不依赖外部 STUN／TURN，必要时回退到图像串流。Canvas 模式不保证提高帧率或绕过车机浏览器限制。
-- 限制私有 IP 访问的浏览器可尝试 [Tesla 兼容模式](docs/TESLA_HTTP.md)，但不能据此保证所有车机和 Android 设备均可用。
+- 限制私有 IP 访问的浏览器可尝试 [路由代理](docs/TESLA_HTTP.md)（原 Tesla 兼容模式），但不能据此保证所有车机和 Android 设备均可用。
 - 仅在可信局域网使用。HTTP 流量未加密，可选 HTTPS 需要受信任的证书；请勿将服务暴露到公网。首次配置和兼容性测试应在车辆停稳后进行。
 
 ## 构建

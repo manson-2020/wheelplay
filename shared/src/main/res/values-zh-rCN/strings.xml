@@ -171,7 +171,7 @@
     <string name="ui_collapsed">已折叠</string>
     <string name="ui_start">启动</string>
     <string name="ui_settings">设置</string>
-    <string name="ui_tesla_compatibility_experimental">Tesla 兼容（实验）</string>
+    <string name="ui_routing_proxy_address">路由代理</string>
     <string name="ui_ethernet">以太网</string>
     <string name="ui_hotspot">热点</string>
     <string name="ui_usb_network">USB 网络</string>
@@ -221,8 +221,9 @@
     <string name="ui_4_seconds_fast_fallback">4 秒 · 快速回退</string>
     <string name="ui_10_seconds_default">10 秒 · 默认</string>
     <string name="ui_30_seconds_keep_webrtc_longer">30 秒 · 优先保持 WebRTC</string>
-    <string name="ui_webrtc_video_passthrough_automatic_fallback">WebRTC 视频直通（自动回退）</string>
-    <string name="ui_jpeg_compatibility_mode">图片（兼容模式）</string>
+    <string name="ui_stream_webrtc">WebRTC 视频直通</string>
+    <string name="ui_stream_webcodecs">WebCodecs 视频通道（推荐）</string>
+    <string name="ui_stream_images">图片（兼容模式）</string>
     <string name="ui_start_the_web_listener_first">请先启动 Web 监听</string>
     <string name="ui_the_shared_ip_matches_the_hotspot_gateway_choose_another">共享 IP 与热点网关相同，请选择其他地址</string>
     <string name="ui_request_root_access_first">请先请求 Root 权限</string>
@@ -308,7 +309,7 @@
     <string name="host_longest_height">最长高度</string>
     <string name="host_physical_length">物理长度</string>
     <string name="host_streaming_technology">串流技术</string>
-    <string name="host_webrtc_supports_h_264_hevc_passthrough_and_falls_back">WebRTC 支持 H.264 / HEVC 直通，浏览器不支持时回退图片串流（JPEG / WebP）。追求 60 fps 请将帧率设为 60。关闭设置后生效。</string>
+    <string name="host_webrtc_supports_h_264_hevc_passthrough_and_falls_back">三个通道传的是同一路 H.264 / HEVC 画面：WebRTC 延迟最低，但部分车机会因此断开蓝牙音频；WebCodecs 保留蓝牙音频且同样可到 60 fps；图片最兼容，约 15 fps。追求 60 fps 请将帧率设为 60。关闭设置后生效。</string>
     <string name="host_hevc_h_265">HEVC (H.265)</string>
     <string name="host_hevc_h_265_video_transport">HEVC H.265 视频传输</string>
     <string name="host_hevc_software_decoder">HEVC 软件解码器</string>
@@ -429,6 +430,7 @@
     <string name="ui_address_must_start_with_http_or_https_token_is">地址必须以 http:// 或 https:// 开头。令牌可选，通过 Authorization 请求头发送。</string>
     <string name="ui_android_13_precise_location_enables_hotspot_channel_detection_if">Android 13 及以上需要精确定位权限来检测热点频道。跳过后继续使用自动模式。本次扫描不记录或上传定位，稍后可在 Android 应用权限中开启。</string>
     <string name="host_hevc_decoder_type">HEVC（H.265，%1$s）</string>
+    <string name="host_hevc_unavailable_using_h_264">H.264（HEVC 无法解码，已自动降级）</string>
     <string name="ui_software">软件解码</string>
     <string name="ui_hardware">硬件解码</string>
     <string name="ui_widest_width">最长宽度</string>
@@ -485,7 +487,7 @@
     <string name="web_connected_waiting_for_video">已连接 · 等待画面</string>
     <string name="web_waiting_for_iphone_video">等待 iPhone 画面…</string>
     <string name="web_fallback">" · 已回退"</string>
-    <string name="web_disable_hevc_to_use_webrtc_on_this_head_unit">在 WheelPlay 设置中关闭 HEVC 才能在此车机上使用 WebRTC</string>
+    <string name="web_disable_hevc_to_use_webrtc_on_this_head_unit">此车机无法解码 HEVC，WheelPlay 正在改用 H.264 重新连接</string>
     <string name="web_transport_touch_connected">%1$s%2$s · 触控已连接</string>
     <string name="web_waiting_for_recovery">" · 等待恢复"</string>
     <string name="web_connected_waiting_for_iphone_video">已连接 · 等待 iPhone 画面</string>

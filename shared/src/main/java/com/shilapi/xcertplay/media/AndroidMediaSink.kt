@@ -43,6 +43,8 @@ class AndroidMediaSink(
     private val encodedVideo: EncodedVideoSink? = null,
     private val frameDecoderFactory: ((ByteArray) -> VideoFrameDecoder?)? = null,
     private val remoteAudio: RemoteAudioRoute? = null,
+    /** The decoder rejected this codec, so the host can stop advertising it to the phone. */
+    private val onVideoCodecFailure: ((VideoCodec) -> Unit)? = null,
 ) : MediaSink, MediaOutputControl {
     @Volatile private var localMediaAllowed = false
     @Volatile private var localMediaRequested: (() -> Unit)? = null
@@ -357,6 +359,7 @@ class AndroidMediaSink(
                 preferSoftwareHevcDecoder,
                 requestKeyFrame = { requestVideoRecovery(type) },
                 report = { videoDiagnosticHandlers[type]?.invoke(it) },
+                onCodecFailure = { codec -> onVideoCodecFailure?.invoke(codec) },
             ).also {
                 videoWorkers.removeIf { it.isStopped }
                 videoWorkers.add(it)
@@ -399,6 +402,7 @@ private class VideoDecoder(
     private val preferSoftwareHevcDecoder: Boolean,
     private val requestKeyFrame: () -> Unit,
     private val report: (String) -> Unit,
+    private val onCodecFailure: (VideoCodec) -> Unit = {},
 ) : Closeable {
     private val queue = VideoDecodeQueue()
     @Volatile private var running = true
@@ -529,6 +533,9 @@ private class VideoDecoder(
             runCatching { candidate?.release() }
             Log.e(TAG, "video decoder configure failed mime=$mime size=${width}x$height", error)
             report("decoder configuration failed mime=$mime size=${width}x$height error=${error.javaClass.simpleName}")
+            // No decoder for this MIME at all (or it refuses the format): the caller may still be
+            // able to ask the phone for the other codec instead of leaving the screen black.
+            onCodecFailure(config.codec)
             null
         }
         decoder = next

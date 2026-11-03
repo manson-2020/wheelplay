@@ -461,11 +461,10 @@ internal class LanWebServer(
         private val rtcRetry = RtcRetryPolicy()
         private var rtcId = 0L
         private var rtcAnswered = false
-        // The WebSocket codec stream replaces WebRTC for head units whose browser drops the phone's
+        // The WebCodecs channel replaces WebRTC for head units whose browser drops the phone's
         // Bluetooth audio link while a WebRTC media transport is active (docs/BROWSER_AUDIO.md).
         private val codecStreamPreferred =
-            AirPlayPersistence.loadBluetoothAudioPriority(context) &&
-                !AirPlayPersistence.loadBrowserAudioPlayback(context)
+            AirPlayPersistence.loadStreamTechnology(context) == StreamTechnology.WEBCODECS
         private var vcs: CodecVideoStream? = null
         private var vcsSource: WebVideoSource? = null
         private var vcsConfig: WebVideoSource.Config? = null
@@ -514,7 +513,7 @@ internal class LanWebServer(
                     rtcConfig = source?.config
                     // The codec stream owns the same compressed source as WebRTC; without this the
                     // `vcsSource === media.source` gate below never passes and VCS stays dead, so
-                    // Bluetooth audio priority could only ever fall back to JPEG.
+                    // the WebCodecs channel could only ever fall back to JPEG.
                     vcsSource = source
                     vcsConfig = source?.config
                     rtcRetry.reset()
@@ -551,6 +550,8 @@ internal class LanWebServer(
                 if (config.codec == VideoCodec.H265 && !hevcSupported) {
                     // The browser already reported that it cannot decode HEVC; the iPhone, not the
                     // service, chooses the codec, so keep JPEG and ask for the setting to change.
+                    // The downgrade itself was requested where the answer arrived, not here: this
+                    // branch is re-entered by every retry and must stay side-effect free.
                     rtcHint = "hevc-unsupported"
                     // Block retries so `rtcAvailable` turns false: otherwise the head unit keeps
                     // offering and the 15 s watchdog would overwrite this hint.
@@ -665,6 +666,8 @@ internal class LanWebServer(
                     // H.264 again (see codecStreamOnly in the host activity).
                     vcsHint = "vcs-hevc-unsupported"
                     vcsRetry.block()
+                    // An empty string is the page's own verdict; null only means it never reported.
+                    if (browserHevc != null) WebSession.reportHevcUnusable("webcodecs")
                     return
                 }
                 if (!vcsRetry.start()) return
@@ -1044,7 +1047,11 @@ internal class LanWebServer(
                                     )
                                     .put(
                                         "transport",
-                                        if (rtcSource?.jpegNeeded == false) "webrtc" else "jpeg",
+                                        when {
+                                            mediaVcs?.holdingFrame == true -> "webcodecs"
+                                            mediaRtc?.holdingFrame == true -> "webrtc"
+                                            else -> "jpeg"
+                                        },
                                     )
                                     .put(
                                         "fallback",
@@ -1114,11 +1121,21 @@ internal class LanWebServer(
                     "vcs-fallback" ->
                         synchronized(rtcLock) {
                             if (data.getLong("id") == vcsId) {
+                                val reason = data.optString("reason", "client-fallback")
                                 Log.i(
                                     "WheelPlayWeb",
-                                    "vcs-fallback id=$vcsId reason=${data.optString("reason", "client-fallback")} " +
+                                    "vcs-fallback id=$vcsId reason=$reason " +
                                         "t=${SystemClock.elapsedRealtime()}",
                                 )
+                                // `codec-unsupported` is the browser's own verdict on the stream it
+                                // was offered (`VideoDecoder.isConfigSupported` or a throwing
+                                // `configure`), so an HEVC stream can step down to H.264 for the
+                                // next setup instead of living on images.
+                                if (reason == "codec-unsupported" &&
+                                    vcsConfig?.codec == VideoCodec.H265
+                                ) {
+                                    WebSession.reportHevcUnusable("webcodecs")
+                                }
                                 stopVcs(data.optBoolean("retryable", true))
                             }
                         }
@@ -1248,6 +1265,9 @@ internal class LanWebServer(
                                     // status line asks for the setting to change instead.
                                     hevcSupported = false
                                     rtcHint = "hevc-unsupported"
+                                    // The host turns this into the H.264 step of the chain by
+                                    // re-advertising HEVC as unavailable at the next setup.
+                                    WebSession.reportHevcUnusable("webrtc")
                                 }
                                 stopRtc(retryable)
                             }

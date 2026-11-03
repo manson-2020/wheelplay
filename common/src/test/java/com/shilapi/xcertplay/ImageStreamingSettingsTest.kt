@@ -17,8 +17,8 @@ class ImageStreamingSettingsTest {
     private val app get() = RuntimeEnvironment.getApplication()
 
     @Test fun preferencesSurviveReloadWithoutReconnectingOrOverridingBrowserCompatibility() {
-        assertEquals(ImageFormat.WEBP, AirPlayPersistence.loadImageFormat(app))
-        assertEquals(75, AirPlayPersistence.loadImageQuality(app))
+        assertEquals(ImageFormat.JPEG, AirPlayPersistence.loadImageFormat(app))
+        assertEquals(90, AirPlayPersistence.loadImageQuality(app))
         val model = SettingsViewModel(app, SavedStateHandle())
         assertEquals(SettingsEffect.None, model.choose(ChoiceSetting.IMAGE_FORMAT, ImageFormat.JPEG.ordinal))
         assertEquals(SettingsEffect.None, model.edit(TextSetting.IMAGE_QUALITY, " 42 "))
@@ -50,8 +50,8 @@ class ImageStreamingSettingsTest {
         val prefs = app.getSharedPreferences("xcertplay_airplay", Context.MODE_PRIVATE)
         for (value in listOf(Int.MIN_VALUE, 0, 101, Int.MAX_VALUE)) {
             prefs.edit().putString("web_image_format", "unknown").putInt("web_image_quality", value).apply()
-            assertEquals(ImageFormat.WEBP, AirPlayPersistence.loadImageFormat(app))
-            assertEquals(75, AirPlayPersistence.loadImageQuality(app))
+            assertEquals(ImageFormat.JPEG, AirPlayPersistence.loadImageFormat(app))
+            assertEquals(90, AirPlayPersistence.loadImageQuality(app))
         }
     }
 }

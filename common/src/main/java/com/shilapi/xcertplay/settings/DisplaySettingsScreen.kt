@@ -26,6 +26,22 @@ import com.shilapi.xcertplay.web.StreamTechnology
 @Composable
 internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsActions) {
     var editMargins by rememberSaveable { mutableStateOf(false) }
+    SettingsGroup(R.string.settings_group_display_layout) {
+        AppearanceSettings(state, actions)
+        DisplaySizeSettings(state, actions, onEditMargins = { editMargins = true })
+    }
+    SettingsGroup(R.string.settings_group_streaming_quality) {
+        StreamingSettings(state, actions)
+    }
+    if (editMargins)
+        SafeAreaDialog(state.margins ?: CarPlaySafeMargins(), { editMargins = false }) {
+            actions.margins(it)
+        }
+}
+
+/** What CarPlay looks like on either screen: mode, size, safe area and overlays. */
+@Composable
+private fun AppearanceSettings(state: SettingsState, actions: SettingsActions) {
     SettingsChoice(
         state,
         actions,
@@ -42,6 +58,29 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
         CarPlayDefaultView.entries.map { settingsString(it.labelRes) },
     )
     SettingsDescription(R.string.settings_default_view_description)
+    SettingsToggle(
+        state,
+        actions,
+        ToggleSetting.RIGHT_HAND,
+        R.string.settings_right_hand,
+        R.string.settings_right_hand_description,
+    )
+    SettingsToggle(
+        state,
+        actions,
+        ToggleSetting.PHONE_STATUS_BADGE,
+        R.string.settings_phone_status_badge,
+        R.string.settings_phone_status_badge_description,
+    )
+}
+
+/** Where CarPlay content sits on the head-unit viewport. */
+@Composable
+private fun DisplaySizeSettings(
+    state: SettingsState,
+    actions: SettingsActions,
+    onEditMargins: () -> Unit,
+) {
     SettingsSlider(
         title = R.string.settings_display_size,
         initial = state.displayWidthMm,
@@ -68,9 +107,14 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
                 margins.right,
             )
     SettingsRow(settingsString(R.string.settings_safe_area), summary, "settings:safe-area") {
-        editMargins = true
+        onEditMargins()
     }
     SettingsDescription(R.string.settings_safe_area_description)
+}
+
+/** How the picture is negotiated and encoded on its way to the browser. */
+@Composable
+private fun StreamingSettings(state: SettingsState, actions: SettingsActions) {
     SettingsToggle(
         state,
         actions,
@@ -120,6 +164,13 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
         onCommit = { actions.text(TextSetting.IMAGE_QUALITY, it.toString()) },
     )
     SettingsDescription(R.string.settings_image_quality_description)
+    SettingsToggle(
+        state,
+        actions,
+        ToggleSetting.HEVC,
+        R.string.settings_hevc,
+        R.string.settings_hevc_description,
+    )
     SettingsChoice(
         state,
         actions,
@@ -128,31 +179,6 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
         RtcRecoveryPolicy.entries.map { settingsString(it.labelRes) },
     )
     SettingsDescription(R.string.settings_recovery_description)
-    SettingsToggle(
-        state,
-        actions,
-        ToggleSetting.HEVC,
-        R.string.settings_hevc,
-        R.string.settings_hevc_description,
-    )
-    SettingsToggle(
-        state,
-        actions,
-        ToggleSetting.RIGHT_HAND,
-        R.string.settings_right_hand,
-        R.string.settings_right_hand_description,
-    )
-    SettingsToggle(
-        state,
-        actions,
-        ToggleSetting.PHONE_STATUS_BADGE,
-        R.string.settings_phone_status_badge,
-        R.string.settings_phone_status_badge_description,
-    )
-    if (editMargins)
-        SafeAreaDialog(margins ?: CarPlaySafeMargins(), { editMargins = false }) {
-            actions.margins(it)
-        }
 }
 
 @Composable

@@ -12,7 +12,7 @@ import java.net.NetworkInterface
 /** Keep interface provenance; a private address alone does not imply LAN reachability. */
 internal object LanAddresses {
     enum class Kind(@param:androidx.annotation.StringRes val labelRes: Int, val priority: Int) {
-        TESLA_HTTP(UiR.string.ui_tesla_compatibility_experimental, 5),
+        TESLA_HTTP(UiR.string.ui_routing_proxy_address, 5),
         ETHERNET(UiR.string.ui_ethernet, 10),
         WIFI(UiR.string.host_wi_fi, 10),
         HOTSPOT(UiR.string.ui_hotspot, 20),

@@ -110,7 +110,6 @@ internal class SettingsViewModel(
                     ToggleSetting.ADAPTIVE_SIZE to AirPlayPersistence.loadAdaptiveBrowserSize(app),
                     ToggleSetting.PHONE_STATUS_BADGE to AirPlayPersistence.loadPhoneStatusBadge(app),
                     ToggleSetting.HEVC to AirPlayPersistence.loadHevcEnabled(app),
-                    ToggleSetting.BLUETOOTH_AUDIO to AirPlayPersistence.loadBluetoothAudioPriority(app),
                     ToggleSetting.BROWSER_MEDIA to AirPlayPersistence.loadBrowserMediaToPage(app),
                     ToggleSetting.RIGHT_HAND to AirPlayPersistence.loadRightHandDrive(app),
                     ToggleSetting.HTTPS to WebListenSettings.httpsEnabled(app),
@@ -283,11 +282,10 @@ internal class SettingsViewModel(
                 }
                 ToggleSetting.HEVC -> {
                     AirPlayPersistence.saveHevcEnabled(app, checked)
+                    // Any touch of the switch re-arms HEVC: the next session advertises it again
+                    // instead of keeping the downgrade a previous renderer forced.
+                    AirPlayPersistence.saveHevcUnusable(app, false)
                     SettingsEffect.None
-                }
-                ToggleSetting.BLUETOOTH_AUDIO -> {
-                    AirPlayPersistence.saveBluetoothAudioPriority(app, checked)
-                    SettingsEffect.Reconnect()
                 }
                 ToggleSetting.BROWSER_MEDIA -> {
                     // The route is republished from WebSession, so the phone takes media back with its

@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.shilapi.xcertplay.network.TeslaHttpConfig
 import com.shilapi.xcertplay.network.TeslaHttpMode
 import com.shilapi.xcertplay.settings.*
+import com.shilapi.xcertplay.web.StreamTechnology
 import com.shilapi.xcertplay.web.TeslaHttpCompatibility
 import com.shilapi.xcertplay.web.WebSession
 import org.junit.After
@@ -55,6 +56,17 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun togglingHevcRearmsTheCodecFallbackChain() {
+        val model = SettingsViewModel(app, SavedStateHandle())
+        AirPlayPersistence.saveHevcUnusable(app, true)
+        assertEquals(SettingsEffect.None, model.toggle(ToggleSetting.HEVC, true))
+        assertTrue(AirPlayPersistence.loadHevcEnabled(app))
+        // A previous renderer forcing H.264 must not outlive a deliberate HEVC attempt.
+        assertFalse(AirPlayPersistence.loadHevcUnusable(app))
+        assertTrue(model.state.value.checked(ToggleSetting.HEVC))
+    }
+
+    @Test
     fun mediaSettingsKeepMicrophoneDisabledAndRequestTheAppropriateEffects() {
         val model = SettingsViewModel(app, SavedStateHandle())
         assertTrue(
@@ -73,12 +85,24 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun bluetoothAudioPriorityDefaultsOffAndAsksForAReconnect() {
+    fun streamTechnologyOffersWebRtcWebCodecsAndImagesAndPersistsTheChoice() {
         val model = SettingsViewModel(app, SavedStateHandle())
-        assertFalse(model.state.value.checked(ToggleSetting.BLUETOOTH_AUDIO))
-        assertTrue(model.toggle(ToggleSetting.BLUETOOTH_AUDIO, true) is SettingsEffect.Reconnect)
-        assertTrue(AirPlayPersistence.loadBluetoothAudioPriority(app))
-        assertTrue(model.state.value.checked(ToggleSetting.BLUETOOTH_AUDIO))
+        assertEquals(StreamTechnology.WEBCODECS, AirPlayPersistence.loadStreamTechnology(app))
+        assertEquals(
+            StreamTechnology.WEBCODECS.ordinal,
+            model.state.value.selected(ChoiceSetting.STREAM),
+        )
+        assertTrue(model.choose(ChoiceSetting.STREAM, StreamTechnology.WEBRTC.ordinal) is SettingsEffect.Reconnect)
+        assertEquals(StreamTechnology.WEBRTC, AirPlayPersistence.loadStreamTechnology(app))
+        model.choose(ChoiceSetting.STREAM, StreamTechnology.JPEG.ordinal)
+        assertEquals(StreamTechnology.JPEG, AirPlayPersistence.loadStreamTechnology(app))
+    }
+
+    @Test
+    fun legacyBluetoothAudioPriorityStartsOnTheWebCodecsChannel() {
+        app.getSharedPreferences("xcertplay_airplay", android.content.Context.MODE_PRIVATE).edit()
+            .putBoolean("bluetooth_audio_priority", true).commit()
+        assertEquals(StreamTechnology.WEBCODECS, AirPlayPersistence.loadStreamTechnology(app))
     }
 
     @Test

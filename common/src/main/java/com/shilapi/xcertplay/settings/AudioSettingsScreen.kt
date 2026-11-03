@@ -9,47 +9,44 @@ import com.shilapi.xcertplay.host.R
 
 @Composable
 internal fun AudioSettingsScreen(state: SettingsState, actions: SettingsActions) {
-    SettingsChoice(
-        state,
-        actions,
-        ChoiceSetting.AUDIO_BUFFER,
-        R.string.settings_audio_buffer,
-        listOf(
-            settingsString(R.string.settings_buffer_default),
-            "500 ms",
-            settingsString(R.string.settings_buffer_stable),
-        ),
-    )
-    SettingsChoice(
-        state,
-        actions,
-        ChoiceSetting.AUDIO_OUTPUT,
-        R.string.settings_audio_output,
-        CarPlayAudioOutput.entries.map { settingsString(it.labelRes) },
-    )
-    Text(state.runtime.audioStatus, style = MaterialTheme.typography.bodyMedium)
-    SettingsDescription(R.string.settings_audio_output_description)
-    SettingsToggle(
-        state,
-        actions,
-        ToggleSetting.BROWSER_MEDIA,
-        R.string.settings_browser_media,
-        R.string.settings_browser_media_description,
-    )
-    SettingsToggle(
-        state,
-        actions,
-        ToggleSetting.BLUETOOTH_AUDIO,
-        R.string.settings_bluetooth_audio,
-        R.string.settings_bluetooth_audio_description,
-    )
-    SettingsChoice(
-        state,
-        actions,
-        ChoiceSetting.MICROPHONE,
-        R.string.settings_microphone,
-        CarPlayMicrophoneSource.entries.map { settingsString(it.labelRes) },
-    )
-    Text(state.runtime.microphoneStatus, style = MaterialTheme.typography.bodyMedium)
-    SettingsDescription(R.string.settings_microphone_description)
+    SettingsGroup(R.string.settings_group_sound_output) {
+        SettingsChoice(
+            state,
+            actions,
+            ChoiceSetting.AUDIO_OUTPUT,
+            R.string.settings_audio_output,
+            CarPlayAudioOutput.entries.map { settingsString(it.labelRes) },
+        )
+        Text(state.runtime.audioStatus, style = MaterialTheme.typography.bodyMedium)
+        SettingsDescription(R.string.settings_audio_output_description)
+        SettingsToggle(
+            state,
+            actions,
+            ToggleSetting.BROWSER_MEDIA,
+            R.string.settings_browser_media,
+            R.string.settings_browser_media_description,
+        )
+        SettingsChoice(
+            state,
+            actions,
+            ChoiceSetting.AUDIO_BUFFER,
+            R.string.settings_audio_buffer,
+            listOf(
+                settingsString(R.string.settings_buffer_default),
+                "500 ms",
+                settingsString(R.string.settings_buffer_stable),
+            ),
+        )
+    }
+    SettingsGroup(R.string.settings_group_microphone) {
+        SettingsChoice(
+            state,
+            actions,
+            ChoiceSetting.MICROPHONE,
+            R.string.settings_microphone,
+            CarPlayMicrophoneSource.entries.map { settingsString(it.labelRes) },
+        )
+        Text(state.runtime.microphoneStatus, style = MaterialTheme.typography.bodyMedium)
+        SettingsDescription(R.string.settings_microphone_description)
+    }
 }

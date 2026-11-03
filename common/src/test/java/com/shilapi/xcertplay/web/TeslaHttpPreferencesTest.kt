@@ -13,6 +13,9 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29])
 class TeslaHttpPreferencesTest {
+    /** What a fresh install starts from: the rootless VPN route, already enabled. */
+    private val defaultConfig = TeslaHttpConfig(enabled = true, mode = TeslaHttpMode.VPN)
+
     @Test fun vpnModePreservesRootSettingsAndUsesASeparateSavedAddress() {
         val context = RuntimeEnvironment.getApplication()
         val root = TeslaHttpConfig(true, "100.96.0.2", 81, 444)
@@ -25,18 +28,19 @@ class TeslaHttpPreferencesTest {
         assertNull(TeslaHttpCompatibility.plan(vpn, listOf(HttpDownstream("ap0", 7, "192.168.43.1/24")), 8080, 8443, true))
     }
 
-    @Test fun invalidModeOrReservedPlaceholderFailsClosed() {
+    @Test fun invalidModeOrReservedPlaceholderFallsBackToTheShippedDefault() {
         val context = RuntimeEnvironment.getApplication()
         val prefs = context.getSharedPreferences("tesla_http", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("enabled", true).putString("mode", "UNKNOWN").apply()
-        assertFalse(TeslaHttpCompatibility.config(context).enabled)
+        assertEquals(defaultConfig, TeslaHttpCompatibility.config(context))
         prefs.edit().putString("mode", "VPN").putString("vpn_address", TeslaHttpConfig.VPN_PLACEHOLDER_ADDRESS).apply()
-        assertFalse(TeslaHttpCompatibility.config(context).enabled)
+        // The reserved placeholder must never be advertised; the shipped 6.6.6.6 route replaces it.
+        assertEquals(defaultConfig, TeslaHttpCompatibility.config(context))
     }
 
-    @Test fun modeIsOptInAndSavedAddressAndDomainSurviveReload() {
+    @Test fun freshInstallStartsWithTheVpnRouteAndSavedAddressSurvivesReload() {
         val context = RuntimeEnvironment.getApplication()
-        assertEquals(TeslaHttpConfig(), TeslaHttpCompatibility.config(context))
+        assertEquals(defaultConfig, TeslaHttpCompatibility.config(context))
         val value = TeslaHttpConfig(true, "100.96.0.2", 81, 444)
         TeslaHttpCompatibility.save(context, value)
         assertEquals(value, TeslaHttpCompatibility.config(context))
@@ -50,18 +54,21 @@ class TeslaHttpPreferencesTest {
         val context = RuntimeEnvironment.getApplication()
         val prefs = context.getSharedPreferences("tesla_http", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("enabled", true).putString("address", "100.96.0.2").apply()
-        assertEquals(TeslaHttpConfig(true, "100.96.0.2"), TeslaHttpCompatibility.config(context))
+        assertEquals(
+            defaultConfig.copy(address = "100.96.0.2"),
+            TeslaHttpCompatibility.config(context),
+        )
         prefs.edit().putInt("http_mapping_port", 0).apply()
-        assertEquals(TeslaHttpConfig(), TeslaHttpCompatibility.config(context))
+        assertEquals(defaultConfig, TeslaHttpCompatibility.config(context))
     }
 
     @Test fun invalidStoredConfigCannotStartOrAdvertiseAnArbitraryAddress() {
         val context = RuntimeEnvironment.getApplication()
         val prefs = context.getSharedPreferences("tesla_http", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("enabled", true).putString("address", "0.0.0.0").apply()
-        assertEquals(TeslaHttpConfig(), TeslaHttpCompatibility.config(context))
+        assertEquals(defaultConfig, TeslaHttpCompatibility.config(context))
         prefs.edit().putString("address", TeslaHttpConfig.DEFAULT_ADDRESS)
             .putInt("https_mapping_port", 0).apply()
-        assertEquals(TeslaHttpConfig(), TeslaHttpCompatibility.config(context))
+        assertEquals(defaultConfig, TeslaHttpCompatibility.config(context))
     }
 }

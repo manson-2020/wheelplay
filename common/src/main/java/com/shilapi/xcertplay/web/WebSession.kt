@@ -296,6 +296,20 @@ internal object WebSession {
     private var phoneConnectHandler: (() -> String)? = null
     private var lastPhoneConnectAt: Long? = null
 
+    /**
+     * Invoked (on a server thread) when a page proved it cannot decode the HEVC stream this session
+     * is sending. Only the host can re-negotiate the codec, so it takes care of the H.264 step.
+     */
+    @Volatile private var hevcUnusableHandler: ((String) -> Unit)? = null
+
+    fun setHevcUnusableHandler(handler: ((String) -> Unit)?) {
+        hevcUnusableHandler = handler
+    }
+
+    fun reportHevcUnusable(source: String) {
+        hevcUnusableHandler?.invoke(source)
+    }
+
     private var browserDevices: RememberedBrowsers? = null
     private var browserDevicesContext: Context? = null
 

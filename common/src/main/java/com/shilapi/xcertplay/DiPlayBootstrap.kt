@@ -43,7 +43,7 @@ internal object DiPlayPreferences {
     }
     fun homeSource(context: Context): String = prefs(context).getString("home_source", ProjectionSourceIds.CARPLAY) ?: ProjectionSourceIds.CARPLAY
     fun saveHomeSource(context: Context, id: String) { prefs(context).edit().putString("home_source", id).apply() }
-    fun autoConnect(context: Context) = prefs(context).getBoolean("auto_connect", false)
+    fun autoConnect(context: Context) = prefs(context).getBoolean("auto_connect", true)
     fun saveAutoConnect(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean("auto_connect", value).apply()
     }

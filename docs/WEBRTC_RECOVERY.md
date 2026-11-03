@@ -21,7 +21,7 @@ WebRTC 视频直通省去 Android 解码、像素读取和 JPEG 压缩，但稳�
 部分车机（已实测 Tesla）在浏览器开始播放媒体后会主动断开手机的 A2DP 链路，方向盘切歌随之失效；
 断开发生在直连建立后 1–2 秒，与渲染方式（原生 Video / 兼容 Canvas / 直接 Canvas）无关，协商中并无音频
 m-line，音频输出为安卓设备时页面也不会创建 AudioContext——触发的是 WebRTC 媒体传输本身，页面侧无解。
-需要蓝牙音频时，在「设置 → 音频与麦克风」开启「蓝牙音频优先」：音频输出为安卓设备时不再协商 WebRTC，
+需要蓝牙音频时，在「设置 → 画面与串流 → 串流技术」选择「WebCodecs 视频通道」：不再协商 WebRTC，
 改用配对 WebSocket 通道上的压缩视频串流（细节见 [浏览器音频](BROWSER_AUDIO.md)），不支持时自动回到图片串流。
 浏览器可用 `?rtcexp=noanswer` / `?rtcexp=inactive` 区分「收到 offer」「传输建立」「媒体流动」三个触发阶段。
 
@@ -81,7 +81,7 @@ H.264 与 H.265 都能直连。两个前提条件容易漏：别名所在的 TUN
 | reason | 含义 | 定向动作 |
 | --- | --- | --- |
 | `rtc-not-requested` | 服务端可见 WebRTC 能力，但 15 秒内没有收到 `rtc-start`（车机没有 `RTCPeerConnection`） | 走能力提示，不再折腾 SDP |
-| `codec-unsupported` | `supportsCodec` 返回 false；能力列表为空时不再判定为不支持，交由 SDP answer 决定 | 关闭 iPhone HEVC；服务端会记住并停止再发 H.265 offer |
+| `codec-unsupported` | `supportsCodec` 返回 false；能力列表为空时不再判定为不支持，交由 SDP answer 决定 | 自动降级 H.264：服务端记住这台车机解不了 HEVC，重建会话后不再通告 HEVC（拨动 HEVC 开关可重新尝试） |
 | `codec-rejected` | answer 出现 `m=video 0` | profile 为 `4d`/`64` 时日志附带 `profile-mismatch`，才考虑转码 |
 | `offer:*` / `answer:*` | `setRemoteDescription` / answer 生成抛错 | 按 `err.name` 决定是否净化 SDP |
 | `local-desc:*` | DTLS 角色改写后 `setLocalDescription` 抛错 | 已自动用原始 `a=setup:active` 重试一次 |
@@ -105,7 +105,7 @@ H.264 与 H.265 都能直连。两个前提条件容易漏：别名所在的 TUN
 （`fallback=<reason> conn=… ice=… gather=… [track=1]`）。回退记录保留到下一次成功显示首帧为止，
 重试间隙拍屏也能看到；`mdns` 候选数、`setup` 角色和 `conn` 状态是判断车机端卡在哪一步的依据。
 
-车机上可用 `?diag=1` 看到 WebRTC 现场：状态行只保留简短的 ` · WebRTC: <reason|ok|idle>`（顶栏高度固定，长文本会溢出遮住画面），能力快照与上面的 answer / fallback 详情一起放进画面左下角的独立诊断框（可滚动、不拦截触控），不依赖 devtools / adb；`?unhide=1` 让首帧前的 video 保持视口内 1 px、`opacity:0`  的布局盒（`pending-video`）而不是 `display:none`，用于验证老 Chromium 是否不解码隐藏元素（原生 Video 与兼容 Canvas 模式有 video 元素；直接 Canvas 模式不需要）。二者都只是开关，默认行为不变。HEVC 被拒后状态栏会提示「在 WheelPlay 设置中关闭 HEVC 才能在此车机上使用 WebRTC」。
+车机上可用 `?diag=1` 看到 WebRTC 现场：状态行只保留简短的 ` · WebRTC: <reason|ok|idle>`（顶栏高度固定，长文本会溢出遮住画面），能力快照与上面的 answer / fallback 详情一起放进画面左下角的独立诊断框（可滚动、不拦截触控），不依赖 devtools / adb；`?unhide=1` 让首帧前的 video 保持视口内 1 px、`opacity:0`  的布局盒（`pending-video`）而不是 `display:none`，用于验证老 Chromium 是否不解码隐藏元素（原生 Video 与兼容 Canvas 模式有 video 元素；直接 Canvas 模式不需要）。二者都只是开关，默认行为不变。HEVC 被拒后状态栏提示「此车机无法解码 HEVC，WheelPlay 正在改用 H.264 重新连接」，随后自动重建会话。
 
 ## 排查与真机验证
 

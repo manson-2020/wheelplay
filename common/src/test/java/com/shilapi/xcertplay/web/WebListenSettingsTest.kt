@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.web
 
 import android.content.Context
 import com.shilapi.xcertplay.network.TeslaHttpConfig
+import com.shilapi.xcertplay.network.TeslaHttpMode
 import com.shilapi.xcertplay.network.TeslaHttpStatus
 import org.junit.Assert.*
 import org.junit.Before
@@ -42,7 +43,10 @@ class WebListenSettingsTest {
         assertEquals(9443, WebListenSettings.httpsPort(context))
         assertEquals("car.example.com", WebListenSettings.hostname(context))
         assertTrue(WebListenSettings.httpsEnabled(context))
-        assertEquals(TeslaHttpConfig(true, "3.3.3.3"), TeslaHttpCompatibility.config(context))
+        assertEquals(
+            TeslaHttpConfig(true, "3.3.3.3", mode = TeslaHttpMode.VPN),
+            TeslaHttpCompatibility.config(context),
+        )
         assertFalse(RootAccess.granted)
         WebListenSettings.saveHttpPort(context, 9080)
         assertEquals(80, TeslaHttpCompatibility.config(context).httpMappingPort)

@@ -100,8 +100,8 @@ class SettingsCategoryNavigationTest : ComposeSettingsTest() {
                     "音频与麦克风" to "choice:MICROPHONE",
                     "车厂与定位" to "choice:LOCATION",
                     "浏览器设备" to "settings:devices",
-                    "Web 服务" to "text:HTTP_PORT",
-                    "Tesla 兼容（实验）" to "choice:TESLA_MODE",
+                    "网络与访问" to "text:HTTP_PORT",
+                    "网络与访问" to "choice:TESLA_MODE",
                     "CarPlay 认证资源" to "settings:download",
                     "帮助与关于" to "settings:source",
                 )) {

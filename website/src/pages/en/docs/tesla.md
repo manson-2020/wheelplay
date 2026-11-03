@@ -1,16 +1,16 @@
 ---
 layout: ../../../layouts/DocsLayout.astro
-title: Tesla compatibility mode (experimental)
+title: Routing proxy (formerly Tesla compatibility)
 description: An alternative entry point for car browsers that restrict private network addresses, with no-root VPN and root hotspot routing options.
 ---
 
-Some car browsers cannot open ordinary local network addresses. Tesla compatibility mode attempts to provide an alternative address for the WheelPlay web service running on your Android phone. Despite its name, it may also help other car browsers with the same restriction.
+Some car browsers cannot open ordinary local network addresses. The routing proxy exposes the WheelPlay web service running on your Android phone under a second access address. It was called “Tesla compatibility” in earlier builds and may also help other car browsers with the same restriction.
 
 **This is experimental and does not guarantee support for every car or Android system.** Leave it off if the normal local address already works. It changes the browser access address; it is not a projection source and does not add capabilities to CarPlay, Android Auto, or VNC.
 
 ## Choose a connection method
 
-Select a method under **Settings → Tesla compatibility (experimental) → Connection method**. Both options are off by default. Switching methods disables the current mode, so you must explicitly enable it again; each method retains its address settings. Neither forwards Internet traffic from third-party VPNs.
+Select a method under **Settings → Network & access → Routing proxy → Connection method**. A fresh install selects and enables the rootless VPN (authorize it once on the settings page); the root hotspot route needs to be enabled manually. Switching methods disables the current mode, so you must explicitly enable it again; each method retains its address settings. Neither forwards Internet traffic from third-party VPNs.
 
 | Method | Permission required | Default HTTP address | Ports |
 | --- | --- | --- | --- |
@@ -46,7 +46,7 @@ This method needs a rooted Android device with working `su`, `ip`, and `iptables
 
 1. Select **Root hotspot routing**, choose **Request root permission**, and grant WheelPlay access in your root manager. Enable compatibility mode after the check succeeds. This method itself does not request Android VPN permission.
 2. The default shared IP is `100.96.0.1`. If you change it, avoid conflicts with mobile networks, other VPNs, or local network addresses.
-3. HTTP / HTTPS mapped ports default to `80` / `443`. You may choose distinct ports in `1–1023`; they forward to the actual listeners under **Settings → Web service**. HTTPS mapping is installed only when HTTPS is enabled and its listener starts successfully.
+3. HTTP / HTTPS mapped ports default to `80` / `443`. You may choose distinct ports in `1–1023`; they forward to the actual listeners under **Settings → Network & access → Web listeners**. HTTPS mapping is installed only when HTTPS is enabled and its listener starts successfully.
 4. Wait for “Root hotspot routing enabled,” then open the complete address shown in the app and pair the browser. The default HTTP address is `http://100.96.0.1/`; include the port if you selected a non-default mapping.
 5. If permission is denied, a command is missing, a port is occupied, or rule installation fails, resolve the displayed error before selecting **Restart root routing**. The app does not repeatedly request root permission.
 
@@ -56,7 +56,7 @@ Root routing is independent of the iPhone session. Wired CarPlay still requires 
 
 ## HTTPS, hostnames, and pairing
 
-- Enable HTTPS separately under **Settings → Web service**. The no-root method uses the actual HTTPS listener port (`8443` by default); root routing can use the mapped port (`443` by default).
+- Enable HTTPS separately under **Settings → Network & access → Web listeners**. The no-root method uses the actual HTTPS listener port (`8443` by default); root routing can use the mapped port (`443` by default).
 - The certificate must cover the actual IP or hostname and be trusted by the car browser. The default local certificate is refreshed when the access IP or hostname changes; check coverage yourself for imported certificates. Do not configure browser microphone access by bypassing certificate errors.
 - Entering a custom hostname does not configure DNS. You must arrange for it to resolve to the actual access IP.
 - Changing the protocol, address, or port changes the browser origin and requires pairing again. The compatibility address uses the existing pairing, device revocation, and single-browser control rules.

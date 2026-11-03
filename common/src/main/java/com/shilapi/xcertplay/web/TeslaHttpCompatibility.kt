@@ -20,6 +20,11 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** Web-service-owned routing. Only the selected VPN mode binds the shared CarPlay VpnService. */
 internal object TeslaHttpCompatibility {
+    /**
+     * What a fresh install starts from: the rootless VPN route is already on, so the head-unit
+     * browser reaches this phone without the user having to open settings and pick a mode first.
+     */
+    private val DEFAULT_CONFIG = TeslaHttpConfig(enabled = true, mode = TeslaHttpMode.VPN)
     private val main = Handler(Looper.getMainLooper())
     private val worker =
         Executors.newSingleThreadScheduledExecutor { work ->
@@ -67,15 +72,17 @@ internal object TeslaHttpCompatibility {
         val prefs = preferences(context)
         return runCatching {
                 TeslaHttpConfig(
-                    prefs.getBoolean("enabled", false),
-                    prefs.getString("address", TeslaHttpConfig.DEFAULT_ADDRESS)!!,
-                    prefs.getInt("http_mapping_port", 80),
-                    prefs.getInt("https_mapping_port", 443),
-                    TeslaHttpMode.valueOf(prefs.getString("mode", TeslaHttpMode.ROOT.name)!!),
-                    prefs.getString("vpn_address", TeslaHttpConfig.DEFAULT_VPN_ADDRESS)!!,
+                    prefs.getBoolean("enabled", DEFAULT_CONFIG.enabled),
+                    prefs.getString("address", DEFAULT_CONFIG.address)!!,
+                    prefs.getInt("http_mapping_port", DEFAULT_CONFIG.httpMappingPort),
+                    prefs.getInt("https_mapping_port", DEFAULT_CONFIG.httpsMappingPort),
+                    TeslaHttpMode.valueOf(
+                        prefs.getString("mode", DEFAULT_CONFIG.mode.name)!!
+                    ),
+                    prefs.getString("vpn_address", DEFAULT_CONFIG.vpnAddress)!!,
                 )
             }
-            .getOrDefault(TeslaHttpConfig())
+            .getOrDefault(DEFAULT_CONFIG)
     }
 
     fun save(context: Context, config: TeslaHttpConfig) {
@@ -166,7 +173,7 @@ internal object TeslaHttpCompatibility {
                                 context.getString(it.mode.labelRes),
                             ) ?: "")
                         },
-                mode = config?.mode ?: TeslaHttpMode.ROOT,
+                mode = config?.mode ?: DEFAULT_CONFIG.mode,
             )
         if (retry) main.post { vpn.retry() }
         worker.execute {
