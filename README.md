@@ -86,7 +86,7 @@ Configure your Android SDK through `ANDROID_HOME` or `sdk.dir` in an untracked `
 ./gradlew :mobile:assembleDebug
 ```
 
-Output: `mobile/build/outputs/apk/debug/mobile-debug.apk` (application ID `moe.feng.wheelplay.debug`). The first native build fetches pinned libdatachannel and Mbed TLS sources from GitHub. The default build excludes CarPlay authentication resources; import them after installation.
+Output: `mobile/build/outputs/apk/debug/mobile-debug.apk` (application ID `top.wheelpay.tesla.debug`). The first native build fetches pinned libdatachannel and Mbed TLS sources from GitHub. The default build excludes CarPlay authentication resources; import them after installation.
 
 For a private provisioned build, place `offline-mfi/identity.pk8` and `offline-mfi/certificate.p7b` beneath `.local/auth-assets/` or the directory selected by `WHEELPLAY_AUTH_ASSETS_DIR`, then run `./gradlew :mobile:assembleProvisionedDebug` to verify the packaged files. Keep these resources out of Git and public APKs.
 

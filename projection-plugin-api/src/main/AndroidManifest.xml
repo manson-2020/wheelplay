@@ -2,5 +2,7 @@
     <queries>
         <package android:name="moe.feng.wheelplay" />
         <package android:name="moe.feng.wheelplay.debug" />
+        <package android:name="top.wheelpay.tesla" />
+        <package android:name="top.wheelpay.tesla.debug" />
     </queries>
 </manifest>

@@ -79,7 +79,7 @@ adb install -r projection-plugin-sample/build/outputs/apk/debug/projection-plugi
 
 此模式仍要求 `onStopProjection()` 先封闭异步回调，解绑并停止 SDK 子服务，等待广播、网络等系统资源完成清理。成功回调表示这部分清理完成；宿主随后解绑，基类退出专用进程，宿主等待该会话 Binder 真正死亡后才释放 Surface 和资源占用。进程退出用于回收残留线程、单例和 native 内存，不能代替 Wi-Fi/P2P/热点的显式清理。SDK 清理失败仍会退出专用进程，但宿主保持隔离，不能将一次崩溃当成成功停止。宿主解绑后若清理钩子一直卡住，独立于 SDK 工作线程的 8 秒兜底会退出该专用进程，不会伪造成功确认。
 
-默认基类只接受安装包名为 `moe.feng.wheelplay` 或 `moe.feng.wheelplay.debug` 的调用 UID，并对后续命令校验该 UID 与会话 token。包名校验不是发布者认证；需要特定宿主发行者时覆盖 `isHostAllowed` 检查其签名证书。宿主按用户启用的插件签名、明确组件和调用 UID 校验插件身份；双方仍应将对端参数视为不可信。
+默认基类只接受安装包名为 `moe.feng.wheelplay`、`moe.feng.wheelplay.debug`、`top.wheelpay.tesla` 或 `top.wheelpay.tesla.debug` 的调用 UID，并对后续命令校验该 UID 与会话 token。包名校验不是发布者认证；需要特定宿主发行者时覆盖 `isHostAllowed` 检查其签名证书。宿主按用户启用的插件签名、明确组件和调用 UID 校验插件身份；双方仍应将对端参数视为不可信。
 
 ## 线协议和生命周期
 

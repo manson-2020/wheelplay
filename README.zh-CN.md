@@ -86,7 +86,7 @@
 ./gradlew :mobile:assembleDebug
 ```
 
-产物为 `mobile/build/outputs/apk/debug/mobile-debug.apk`，应用 ID 为 `moe.feng.wheelplay.debug`。首次原生构建会从 GitHub 获取固定版本的 libdatachannel 和 Mbed TLS。默认构建不包含 CarPlay 认证资源，安装后可自行导入。
+产物为 `mobile/build/outputs/apk/debug/mobile-debug.apk`，应用 ID 为 `top.wheelpay.tesla.debug`。首次原生构建会从 GitHub 获取固定版本的 libdatachannel 和 Mbed TLS。默认构建不包含 CarPlay 认证资源，安装后可自行导入。
 
 如需在私有构建中预置资源，将 `offline-mfi/identity.pk8` 和 `offline-mfi/certificate.p7b` 放到 `.local/auth-assets/` 或 `WHEELPLAY_AUTH_ASSETS_DIR` 指定的目录下，再运行 `./gradlew :mobile:assembleProvisionedDebug` 检查打包结果。不要将这些资源提交到 Git 或公开 APK。
 

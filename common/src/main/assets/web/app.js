@@ -1819,13 +1819,16 @@ if (typeof document !== 'undefined') {
   }
 
   // Re-applied after the first frame and on every resize: a saved offset is only meaningful while
-  // the display box keeps its size, and the gauge must never end up half outside it.
+  // the display box keeps its size, and the gauge must never end up half outside it. Without a saved
+  // offset the disc stays on the CSS home slot in style.css (the left dock, under the status icons),
+  // which is percentage-based and therefore follows a resized picture on its own.
   function restoreBadgePosition() {
     const saved = storedBadgePosition();
     if (saved) moveBadge(saved.x, saved.y);
   }
 
-  // Dragging is the only gesture; a double tap hands the corner back to the default placement.
+  // Dragging is the only gesture; a double tap drops the saved offset and lets that CSS home slot
+  // take over again - no second copy of the default coordinates to keep in sync.
   let badgeDrag = null;
   statusBadge.addEventListener('pointerdown', event => {
     if (event.button) return;

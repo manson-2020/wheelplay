@@ -18,7 +18,8 @@ android {
     }
 
     defaultConfig {
-        applicationId = "moe.feng.wheelplay"
+        // Side-by-side release with the original package; the debug variant appends ".debug".
+        applicationId = "top.wheelpay.tesla"
         minSdk = 28
         targetSdk = 36
         versionCode = 21

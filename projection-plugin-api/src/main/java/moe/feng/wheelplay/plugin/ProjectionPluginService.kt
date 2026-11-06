@@ -33,8 +33,11 @@ abstract class ProjectionPluginService : Service() {
     protected open fun onNightMode(night: Boolean) = Unit
 
     /** Override to apply additional host signing-certificate policy if required by your SDK. */
+    // Known hosts: the stock release/debug pair and the side-by-side Tesla build, which lives under
+    // its own namespace. Anything else is refused - this is not a signing-certificate check.
     protected open fun isHostAllowed(uid: Int): Boolean = packageManager.getPackagesForUid(uid)?.any {
-        it == "moe.feng.wheelplay" || it == "moe.feng.wheelplay.debug"
+        it == "moe.feng.wheelplay" || it == "moe.feng.wheelplay.debug" ||
+            it == "top.wheelpay.tesla" || it == "top.wheelpay.tesla.debug"
     } == true
 
     interface Events {
