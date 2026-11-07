@@ -14,6 +14,12 @@ internal class RtcFrameQueue(
     private val frames = ArrayDeque<Frame>()
     private var waitingSinceNs: Long? = null
     private var lastOfferedNs: Long? = null
+    /**
+     * When the last frame left the queue. Predictive frames age from here rather than from their
+     * arrival: a keyframe can take hundreds of milliseconds on a slow link, and the frames that
+     * waited behind it must not look stale the instant it lands.
+     */
+    private var lastPollNs = 0L
     var bytes = 0; private set
     val size get() = frames.size
     var needsKeyframe = true; private set
@@ -39,10 +45,14 @@ internal class RtcFrameQueue(
     }
     fun poll(now: Long): Frame? {
         expire(now)
-        return if (frames.isEmpty()) null else frames.removeFirst().also { bytes -= it.cost }
+        val frame = frames.removeFirstOrNull() ?: return null
+        bytes -= frame.cost
+        lastPollNs = now
+        return frame
     }
     private fun expire(now: Long) {
-        if (frames.firstOrNull()?.let { now - it.queuedAtNs >= maxAgeNs } == true) {
+        val head = frames.firstOrNull() ?: return
+        if (now - maxOf(head.queuedAtNs, lastPollNs) >= maxAgeNs) {
             expired += frames.size
             invalidate(now)
         }

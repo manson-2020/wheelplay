@@ -310,4 +310,48 @@ class WebStreamSenderTest {
             sender.clearVideo()
         } finally { sender.close() }
     }
+
+    @Test fun aSteadyAudioStreamDoesNotStarveVideoPastItsBudget() {
+        val executor = ManualExecutor(); val sent = mutableListOf<ByteArray>()
+        var time = 0L
+        val sender = WebStreamSender({ null }, { sent.add(it.binaryPayload) }, { fail() }, executor, { time })
+        try {
+            sender.audio(byteArrayOf(1), 1L)
+            sender.video(byteArrayOf(9))
+            // The access unit has already waited two frame periods behind the audio backlog.
+            time = 100
+            sender.video(byteArrayOf(8))
+            executor.runNext()
+            // Video takes the writer first; the queued audio and the fresh frame still follow, so
+            // neither stream is dropped to protect the other.
+            assertEquals(listOf<Byte>(9, 1, 8), sent.map { it[0] })
+        } finally { sender.close() }
+    }
+
+    @Test fun freshVideoStillYieldsToAudio() {
+        val executor = ManualExecutor(); val sent = mutableListOf<ByteArray>()
+        var time = 0L
+        val sender = WebStreamSender({ null }, { sent.add(it.binaryPayload) }, { fail() }, executor, { time })
+        try {
+            sender.audio(byteArrayOf(1), 1L)
+            sender.video(byteArrayOf(9))
+            time = 10
+            executor.runNext()
+            // Audio leads while the video frame is within its 60 ms budget.
+            assertEquals(listOf<Byte>(1, 9), sent.map { it[0] })
+        } finally { sender.close() }
+    }
+
+    @Test fun aWedgedCodecQueueTripsTheWatchdog() {
+        val executor = ManualExecutor(); val sent = mutableListOf<ByteArray>()
+        var time = 0L
+        val sender = WebStreamSender({ null }, { sent.add(it.binaryPayload) }, { fail() }, executor, { time })
+        try {
+            assertTrue(sender.video(byteArrayOf(9)))
+            // Nothing drains: the writer is stuck, exactly like a blocked WebSocket.
+            assertFalse(sender.frameStalled(6000))
+            assertTrue("a codec frame wedged past six seconds must trip the watchdog",
+                sender.frameStalled(6001))
+        } finally { sender.close() }
+    }
 }

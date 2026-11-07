@@ -37,9 +37,14 @@ internal class WebStreamSender(
     private var mediaBufferMillis = MediaAudioBuffer.DEFAULT_MILLIS
     // Compressed access units of the WebSocket codec stream. Only-new drops keep the reference
     // chain intact, exactly like the WebRTC send queue; the codec stream asks for a keyframe.
-    private data class CodecFrame(val frame: WebSocketFrame, val bytes: Int)
+    private data class CodecFrame(val frame: WebSocketFrame, val bytes: Int, val at: Long)
     private val codec = ArrayDeque<CodecFrame>()
     private var codecBytes = 0
+
+    private companion object {
+        /** How long a video access unit may wait behind audio before it takes the writer. */
+        const val VIDEO_PRIORITY_MS = 60L
+    }
 
     fun configureAudioBuffer(millis: Int) = synchronized(lock) {
         mediaBufferMillis = MediaAudioBuffer.sanitize(millis)
@@ -86,7 +91,7 @@ internal class WebStreamSender(
     fun video(packet: ByteArray): Boolean = synchronized(lock) {
         if (closed) return false
         if (codec.size >= 6 || codecBytes + packet.size > 2 * 1024 * 1024) return false
-        codec.addLast(CodecFrame(WebSocketFrame(WebSocketFrame.OpCode.Binary, true, packet), packet.size))
+        codec.addLast(CodecFrame(WebSocketFrame(WebSocketFrame.OpCode.Binary, true, packet), packet.size, now()))
         codecBytes += packet.size
         scheduleLocked()
         true
@@ -150,8 +155,20 @@ internal class WebStreamSender(
 
     fun frameStalled(at: Long): Boolean = synchronized(lock) {
         imagesInFlight.values.firstOrNull()?.let { at - it.at > 6000 } == true ||
-            audioInFlight.values.firstOrNull()?.let { at - it > 2000 } == true
+            audioInFlight.values.firstOrNull()?.let { at - it > 2000 } == true ||
+            // The still-image and audio queues were the only ones watched, so a codec stream that
+            // wedged on its first frame never tripped the watchdog and the viewer had to reload.
+            codec.firstOrNull()?.let { at - it.at > 6000 } == true
     }
+
+    /**
+     * True once the oldest queued access unit has waited past its budget. Audio normally goes
+     * first because it is small and latency sensitive, but a steady audio stream must not starve
+     * video: while it does, the codec stream sheds every frame past its 50 ms budget, so the
+     * picture freezes on the first frame and each keyframe request queues behind the backlog.
+     */
+    private fun videoStarved(at: Long): Boolean =
+        codec.firstOrNull()?.let { at - it.at >= VIDEO_PRIORITY_MS } == true
 
     private fun scheduleLocked() {
         if (closed || scheduled) return
@@ -171,7 +188,8 @@ internal class WebStreamSender(
                     if (control != null) {
                         controls.remove(control.key)
                         control.value
-                    } else if (audio.isNotEmpty() && audioInFlight.size < 4) {
+                    } else if (audio.isNotEmpty() && audioInFlight.size < 4 &&
+                        !videoStarved(now())) {
                         audio.removeAll { now() - it.at > audioBudgetMillis(it) }
                         if (audio.isEmpty()) { scheduled = false; scheduleLocked(); return }
                         val next = audio.removeFirst()
