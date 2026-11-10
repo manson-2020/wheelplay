@@ -16,6 +16,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import moe.feng.wheelplay.*
 
 /**
  * Pins the configuration a fresh install starts from. Every value here is what the settings pages
@@ -28,9 +29,9 @@ class ShippedDefaultsTest {
 
     @Test
     fun connectionDefaults() {
-        assertTrue(DiPlayPreferences.autoConnect(app))
+        assertTrue(WheelPlayPreferences.autoConnect(app))
         assertTrue(AirPlayPersistence.loadAutoStartOnBoot(app))
-        assertTrue(DiPlayPreferences.keepScreenOn(app))
+        assertTrue(WheelPlayPreferences.keepScreenOn(app))
         // Wi-Fi Direct stays the default: the device-hotspot mode needs this phone's own SSID and
         // password, which cannot ship as a default.
         assertEquals(

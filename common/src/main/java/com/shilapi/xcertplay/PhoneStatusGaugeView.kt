@@ -23,6 +23,7 @@ import com.shilapi.xcertplay.web.PhoneStatus
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import moe.feng.wheelplay.*
 
 /**
  * The same circular gauge the browser floats over the head-unit picture, drawn with Canvas for the

@@ -3,6 +3,7 @@ package com.shilapi.xcertplay
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import moe.feng.wheelplay.*
 
 /**
  * The on-phone canvas expansion keeps the dp proportion (both edges scale by the same factor), stays
