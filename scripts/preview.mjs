@@ -13,8 +13,11 @@ const port = Number(process.env.PORT || 8081);
 let jpeg;
 if (demo) {
   const result = spawnSync(ffmpeg, ['-v','error','-f','lavfi','-i','testsrc=size=1280x720:rate=1','-frames:v','1','-f','image2pipe','-vcodec','mjpeg','pipe:1'], { maxBuffer: 4e6 });
-  if (result.status !== 0) throw new Error(result.stderr.toString());
-  jpeg = result.stdout;
+  if (result.status !== 0) {
+    // ffmpeg-static can be missing or quarantined on some machines; a still frame keeps QA alive.
+    console.warn('ffmpeg unavailable, falling back to a static JPEG frame');
+    jpeg = await readFile(new URL('../docs/sample-frame.jpg', import.meta.url)).catch(async () => readFile('/tmp/sample.jpg'));
+  } else jpeg = result.stdout;
 }
 let touchReports = [];
 const tokens = new Set(), devices = new Map(), enrollments = new Map();
@@ -48,8 +51,16 @@ const server = http.createServer(async (req,res) => {
     res.end(JSON.stringify(data)); return;
   }
   if (req.url === '/i18n.js') { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); res.setHeader('Cache-Control', 'no-store'); res.end('globalThis.wheelplayMessages = ' + JSON.stringify(messages) + ';'); return; }
-  const file = { '/':'index.html','/app.js':'app.js','/text.js':'text.js','/browser-audio.js':'browser-audio.js','/browser-location.js':'browser-location.js',
-    '/audio-worklet.js':'audio-worklet.js','/browser-media-session.js':'browser-media-session.js','/desktop-input.js':'desktop-input.js','/style.css':'style.css' }[req.url];
+  const file = { '/':'index.html','/app.js':'app.js','/text.js':'text.js','/style.css':'style.css',
+    '/audio-worklet.js':'audio-worklet.js',
+    // ES modules split out of app.js; missing entries here 404 the module graph and stall the page.
+    '/viewport.js':'viewport.js','/presentation.js':'presentation.js','/media-probes.js':'media-probes.js',
+    '/jpeg-presenter.js':'jpeg-presenter.js','/control-outbox.js':'control-outbox.js',
+    '/browser-appearance.js':'browser-appearance.js','/video-renderer.js':'video-renderer.js',
+    '/rtc-receiver.js':'rtc-receiver.js','/codec-stream.js':'codec-stream.js',
+    '/browser-audio.js':'browser-audio.js','/browser-location.js':'browser-location.js',
+    '/browser-media-session.js':'browser-media-session.js','/desktop-input.js':'desktop-input.js',
+    '/phone-gauge.js':'phone-gauge.js' }[req.url];
   if (!file) { res.writeHead(404);res.end();return; }
   try {
     let body = await readFile(new URL(file,root));
@@ -68,7 +79,8 @@ server.on('upgrade',(req,socket,head) => {
   wss.handleUpgrade(req,socket,head,ws => wss.emit('connection',ws));
 });
 wss.on('connection',ws => {
-  if (viewer) { ws.send(JSON.stringify({type:'busy',message:'已有车机连接，请先在另一台车机断开'}));ws.close();return; }
+  if (viewer) { console.log(`[${new Date().toISOString()}] busy reject #${++wss.rejected ?? (wss.rejected=1)}`); ws.send(JSON.stringify({type:'busy',message:'已有车机连接，请先在另一台车机断开'}));ws.close();return; }
+  console.log(`[${new Date().toISOString()}] viewer connected (total rejected: ${wss.rejected ?? 0})`);
   viewer=ws;let ready=true;
   // Corner-gauge fixtures: rotate through Wi-Fi, 5G, charging and the red low-battery state about
   // every three seconds, which is how often the real server re-reads the phone. The last two entries

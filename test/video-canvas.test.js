@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createVideoCanvasRenderer } from '../common/src/main/assets/web/app.js';
+import { createVideoCanvasRenderer } from '../common/src/main/assets/web/video-renderer.js';
 
 function fixture({ frameCallbacks = true, quality = true } = {}) {
   const animation = new Map(), callbacks = new Map(), draws = [], sizes = [], errors = [], classes = new Set();

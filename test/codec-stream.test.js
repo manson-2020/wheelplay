@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCodecReceiver, CODEC_STREAM_MAGIC } from '../common/src/main/assets/web/app.js';
+import { createCodecReceiver, CODEC_STREAM_MAGIC } from '../common/src/main/assets/web/codec-stream.js';
 
 globalThis.EncodedVideoChunk = class {
   constructor(init) { Object.assign(this, init); }

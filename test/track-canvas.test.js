@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTrackCanvasRenderer } from '../common/src/main/assets/web/app.js';
+import { createTrackCanvasRenderer } from '../common/src/main/assets/web/video-renderer.js';
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture({ contextAvailable = true, constructError = false, onError = () => {} } = {}) {

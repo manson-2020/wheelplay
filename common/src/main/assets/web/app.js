@@ -1,1078 +1,49 @@
 import { t } from './text.js';
 import { createDesktopInput } from './desktop-input.js';
-// A surface inversely scaled inside the visual viewport cancels browser zoom.
-// Its bounding rectangle remains in the same CSS coordinates as pointer events.
-export function unzoomedDisplayRect(rect, visual) {
-  if (!visual || !Number.isFinite(visual.scale) || visual.scale <= 0 || visual.width <= 0 || visual.height <= 0) return null;
-  const left = visual.offsetLeft || 0, offsetTop = visual.offsetTop || 0;
-  const top = Math.max(offsetTop, rect.top || 0);
-  return { left, top, width: visual.width, height: Math.max(0, offsetTop + visual.height - top), scale: visual.scale };
-}
-
-// Match WebSession's viewport bounds. A small visible area can still display a
-// larger negotiated canvas; scale both axes together instead of stretching it.
-export function browserViewportSize(width, height) {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
-  const ratio = width / height;
-  if (ratio < 0.5 || ratio > 4) return null;
-  const scale = Math.min(8192 / Math.max(width, height), Math.max(1, 320 / Math.min(width, height)));
-  const even = value => Math.round(value / 2) * 2;
-  const h = even(height * scale);
-  // Even-pixel rounding must not push an otherwise valid ratio outside bounds.
-  const w = Math.max(Math.ceil(h / 4) * 2, Math.min(h * 4, even(width * scale)));
-  if (!Number.isFinite(w) || !Number.isFinite(h) || w < 320 || h < 320 || w > 8192 || h > 8192) return null;
-  return { width: w, height: h };
-}
-
-// Coordinates are normalized in the visible video rectangle, excluding letterboxing.
-export function mapPoint(clientX, clientY, rect, width, height, clamp = false) {
-  if (width <= 0 || height <= 0 || rect.width <= 0 || rect.height <= 0) return null;
-  const scale = Math.min(rect.width / width, rect.height / height);
-  const w = width * scale, h = height * scale;
-  const x = (clientX - rect.left - (rect.width - w) / 2) / w;
-  const y = (clientY - rect.top - (rect.height - h) / 2) / h;
-  if (!clamp && (x < 0 || x > 1 || y < 0 || y > 1)) return null;
-  return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
-}
-
-export function pairingCodeFromUrl(search) {
-  const match = String(search || '').match(/(?:^|[?&])code=([^&]*)/);
-  let code = '';
-  try { code = match ? decodeURIComponent(match[1].replace(/\+/g, ' ')) : ''; } catch (_) { return null; }
-  return /^[0-9]{6}$/.test(code) ? code : null;
-}
-
-// Source availability, a committed picture and input readiness are independent.
-// Silence is normal for a static screen; only an explicit gap starts this deadline.
-export function createPresentationController({
-  onChange = () => {}, schedule = setTimeout, cancel = clearTimeout,
-  now = () => performance.now(), holdMs = 2000,
-} = {}) {
-  let connected = false, source = 'waiting', inputReady = true, frame = null;
-  let sessionId = null, videoEpoch = null, revision = 0, invalid = false;
-  let deadline = null, timer = null, timerGeneration = 0;
-  const same = picture => picture && picture.revision === revision && !invalid;
-  function clearDeadline() { cancel(timer); timer = null; deadline = null; timerGeneration++; }
-  function snapshot() {
-    const showing = connected && same(frame) && source === 'ready';
-    const recovering = connected && !!frame && !showing && source !== 'stopped';
-    const held = recovering && deadline !== null && now() < deadline;
-    return { state: !connected ? 'disconnected' : showing ? 'showing' : held ? 'recovering' : 'waiting',
-      visible: showing || held, interactive: showing && inputReady,
-      frame, sessionId, videoEpoch, revision };
-  }
-  function publish() {
-    const value = snapshot();
-    if (value.state === 'showing' || !connected || source === 'stopped' || !frame) clearDeadline();
-    else if (deadline === null) {
-      deadline = now() + holdMs;
-      const token = ++timerGeneration;
-      const expire = () => {
-        if (token !== timerGeneration) return;
-        const remaining = deadline - now();
-        if (remaining > 0) { timer = schedule(expire, remaining); return; }
-        timer = null; onChange(snapshot());
-      };
-      timer = schedule(expire, holdMs);
-    }
-    onChange(snapshot());
-  }
-  function accept(meta = {}) {
-    if (!connected) return false;
-    if (meta.videoEpoch == null) return videoEpoch === null;
-    if (!Number.isSafeInteger(meta.videoEpoch) || !Number.isSafeInteger(meta.sessionId) ||
-        meta.videoEpoch < 0 || meta.sessionId < 0) return false;
-    if (videoEpoch !== null && (meta.videoEpoch < videoEpoch ||
-      meta.videoEpoch === videoEpoch && meta.sessionId !== sessionId)) return false;
-    if (meta.videoEpoch !== videoEpoch || meta.sessionId !== sessionId) {
-      sessionId = meta.sessionId; videoEpoch = meta.videoEpoch; revision++;
-      source = 'waiting'; inputReady = false; invalid = false;
-    }
-    return true;
-  }
-  return {
-    open() { clearDeadline(); connected = true; source = 'waiting'; inputReady = true;
-      frame = null; sessionId = videoEpoch = null; revision++; invalid = false; publish(); },
-    close() { connected = false; frame = null; revision++; publish(); },
-    status(meta) {
-      if (!accept(meta)) return false;
-      // Compatibility with servers predating versioned media packets.
-      if (videoEpoch === null && frame && frame.transport !== 'rtc' && (meta.width !== frame.width || meta.height !== frame.height)) {
-        revision++; invalid = false;
-      }
-      source = meta.sourceState || (meta.streaming ? 'ready' : 'recovering');
-      inputReady = meta.inputReady ?? source === 'ready';
-      publish(); return true;
-    },
-    present(meta, width, height, transport, expectedRevision = null) {
-      if (!accept(meta) || source === 'stopped' || expectedRevision !== null && expectedRevision !== revision) return false;
-      frame = { width, height, transport, revision, mime: meta.mime }; invalid = false;
-      if (videoEpoch === null) { source = 'ready'; inputReady = true; }
-      publish(); return true;
-    },
-    accepts(meta) {
-      const previous = revision, accepted = accept(meta);
-      if (accepted && previous !== revision) publish();
-      return accepted;
-    },
-    invalidate(transport) { if (frame?.transport === transport) { invalid = true; publish(); } },
-    forget() { frame = null; publish(); },
-    inputUnavailable() { inputReady = false; publish(); },
-    refresh: publish,
-    get current() { return snapshot(); },
-  };
-}
-
-// V3 appends the negotiated image format to the v2 header. PCM has a different magic.
-export function decodeVideoPacket(buffer) {
-  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < 4) return null;
-  const view = new DataView(buffer);
-  const magic = view.getUint32(0, true), protocol = magic === 0x33565057 ? 3 : magic === 0x32565057 ? 2 : null;
-  if (!protocol) return null;
-  const headerBytes = protocol === 3 ? 40 : 36;
-  if (buffer.byteLength <= headerBytes) throw new Error('Truncated video packet');
-  const packet = { sessionId: view.getFloat64(4, true), videoEpoch: view.getFloat64(12, true),
-    sequence: view.getFloat64(20, true), width: view.getUint32(28, true), height: view.getUint32(32, true) };
-  if (![packet.sessionId, packet.videoEpoch, packet.sequence].every(value => Number.isSafeInteger(value) && value >= 0) ||
-      packet.width < 1 || packet.height < 1) throw new Error('Invalid video packet');
-  const format = protocol === 3 ? view.getUint32(36, true) : 1;
-  if (![1, 2].includes(format)) throw new Error('Invalid image format');
-  return { ...packet, protocol, mime: format === 2 ? 'image/webp' : 'image/jpeg', jpeg: buffer.slice(headerBytes) };
-}
-
-export function probeWebp({ createImage = () => new Image(), schedule = setTimeout, cancel = clearTimeout,
-  createUrl = data => URL.createObjectURL(data), revokeUrl = url => URL.revokeObjectURL(url),
-} = {}) {
-  return new Promise(resolve => {
-    let image, url = null, timer = null, finished = false;
-    const finish = supported => {
-      if (finished) return; finished = true; cancel(timer);
-      if (image) { image.onload = image.onerror = null; image.removeAttribute('src'); }
-      if (url !== null) revokeUrl(url);
-      resolve(supported);
-    };
-    try {
-      image = createImage(); timer = schedule(() => finish(false), 1500);
-      image.onload = () => finish(image.naturalWidth === 2 && image.naturalHeight === 2);
-      image.onerror = () => finish(false);
-      // The Android page allows blob: images but deliberately blocks data: URLs.
-      // This is the same 2x2 WebP fixture used by the capability probe.
-      url = createUrl(new Blob([new Uint8Array([
-        82, 73, 70, 70, 60, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 32, 48, 0, 0, 0,
-        208, 1, 0, 157, 1, 42, 2, 0, 2, 0, 2, 0, 52, 37, 160, 2, 116, 186, 1, 248,
-        0, 3, 176, 0, 254, 240, 196, 11, 255, 32, 185, 97, 117, 200, 215, 255, 32,
-        63, 228, 7, 252, 128, 255, 248, 242, 0, 0, 0,
-      ])], { type: 'image/webp' }));
-      image.src = url;
-    } catch (_) { finish(false); }
-  });
-}
-
-// HEVC support belongs to the browser build, not to the stream, and a head unit has no console:
-// probe it once so `?diag=1` can report `hevc=1/0` next to the H.264-only codec stream. Three
-// strings, because a decoder may take the hvc1 sample entry but not hev1 - or only the lower level;
-// the first that answers true is the one a codec stream could later be configured with. Resolves to
-// that string, or null when HEVC is unreachable here.
-export const HEVC_CODEC_STRINGS = ['hvc1.1.6.L93.B0', 'hvc1.1.6.L123.B0', 'hev1.1.6.L93.B0'];
-export function probeHevc({ decoder = typeof VideoDecoder === 'undefined' ? null : VideoDecoder,
-  candidates = HEVC_CODEC_STRINGS } = {}) {
-  if (!decoder || typeof decoder.isConfigSupported !== 'function') return Promise.resolve(null);
-  const attempt = index => {
-    if (index >= candidates.length) return null;
-    const codec = candidates[index];
-    let request;
-    // A malformed string throws instead of rejecting, so the fallback covers both.
-    try { request = decoder.isConfigSupported({ codec, optimizeForLatency: true }); }
-    catch (_) { return null; }
-    return Promise.resolve(request)
-      .then(result => result?.supported === true ? codec : attempt(index + 1))
-      .catch(() => attempt(index + 1));
-  };
-  return Promise.resolve(attempt(0));
-}
-
-// At most two decodes plus the displayed frame. Newer commits retire older work.
-export function createJpegPresenter(images, { onFrame, onError = () => {},
-  createUrl = data => URL.createObjectURL(data), revokeUrl = url => URL.revokeObjectURL(url),
-} = {}) {
-  let front = null, generation = 0, nextOrder = 0, committedOrder = 0;
-  const urls = new Map(), pending = new Map();
-  function discard(image) {
-    image.onload = image.onerror = null; image.removeAttribute('src'); image.hidden = true;
-    if (urls.has(image)) revokeUrl(urls.get(image)); urls.delete(image);
-  }
-  function retire(image) {
-    const work = pending.get(image); if (!work) return;
-    pending.delete(image); discard(image); work.done();
-  }
-  function cancelPending() {
-    generation++;
-    for (const image of [...pending.keys()]) retire(image);
-  }
-  return {
-    load(data, meta, valid, done) {
-      let image = images.find(item => item !== front && !pending.has(item));
-      if (!image || pending.size >= Math.min(2, images.length - 1)) {
-        image = pending.keys().next().value; retire(image);
-      }
-      const work = { done, order: ++nextOrder }, token = generation;
-      pending.set(image, work); image.hidden = true;
-      const url = createUrl(data); urls.set(image, url);
-      image.onload = () => {
-        if (token !== generation || pending.get(image) !== work) return;
-        pending.delete(image); image.onload = image.onerror = null;
-        if (work.order <= committedOrder || !valid() || !image.naturalWidth || !image.naturalHeight) { discard(image); done(); return; }
-        const previous = front;
-        const accepted = onFrame(meta, image.naturalWidth, image.naturalHeight);
-        if (token !== generation) { done(); return; }
-        if (accepted === false) { discard(image); done(); return; }
-        committedOrder = work.order;
-        front = image; image.hidden = false;
-        if (previous) discard(previous);
-        for (const [other, older] of [...pending]) if (older.order < work.order) retire(other);
-        done();
-      };
-      image.onerror = () => {
-        if (token !== generation || pending.get(image) !== work) return;
-        pending.delete(image); discard(image); done(); onError(meta);
-      };
-      image.src = url;
-    },
-    cancelPending,
-    hide() { if (front) front.hidden = true; },
-    show() { if (front) front.hidden = false; },
-    clear() { cancelPending(); images.forEach(discard); front = null; },
-    get current() { return front; },
-  };
-}
-
-// Keep essential controls until WebSocket accepts them. A successful send is never retried.
-export function createControlOutbox(socket, {
-  schedule = setTimeout, cancel = clearTimeout, now = () => Date.now(), onFailure = () => socket.close(),
-} = {}) {
-  const touches = [], imageAcks = new Map();
-  const signals = [];
-  let ack = null, audioAck = null, audioReady = null, ping = null, feedback = null, viewport = null, locationFix = null, timer = null, blockedSince = null, closed = false;
-  const close = () => {
-    closed = true; cancel(timer); timer = null;
-    ack = null; audioAck = null; audioReady = null; ping = null; feedback = null; viewport = null; locationFix = null; touches.length = 0; signals.length = 0;
-    imageAcks.clear();
-  };
-  const fail = () => { close(); onFailure(); };
-  const flush = () => {
-    if (closed) return;
-    if (socket.readyState !== 1) { close(); return; }
-    try {
-      while ((ack || imageAcks.size || audioAck || audioReady || touches.length || signals.length || viewport || locationFix || feedback || ping) && socket.bufferedAmount < 8192) {
-        if (imageAcks.size) {
-          const [key, json] = imageAcks.entries().next().value; socket.send(json); imageAcks.delete(key);
-        } else if (ack) { socket.send(ack); ack = null; }
-        else if (audioAck) { socket.send(audioAck); audioAck = null; }
-        else if (audioReady) { socket.send(audioReady); audioReady = null; }
-        else if (touches.length) { socket.send(touches[0].json); touches.shift(); }
-        else if (signals.length) { socket.send(signals[0]); signals.shift(); }
-        else if (viewport) { socket.send(viewport); viewport = null; }
-        else if (locationFix) { socket.send(locationFix); locationFix = null; }
-        else if (feedback) { socket.send(feedback); feedback = null; }
-        else { socket.send(ping); ping = null; }
-        blockedSince = null;
-      }
-    } catch (_) { fail(); return; }
-    if (ack || imageAcks.size || audioAck || audioReady || touches.length || signals.length || viewport || locationFix || feedback || ping) {
-      if (blockedSince === null) blockedSince = now();
-      if (now() - blockedSince >= 1500) { fail(); return; }
-      if (timer === null) timer = schedule(() => { timer = null; flush(); }, 10);
-    } else {
-      cancel(timer); timer = null; blockedSince = null;
-    }
-  };
-  return {
-    send(data, kind = 'edge') {
-      if (closed || socket.readyState !== 1) return false;
-      const json = JSON.stringify(data);
-      if (data.type === 'ack' && Number.isSafeInteger(data.sequence)) {
-        const key = `${data.sessionId}/${data.videoEpoch}/${data.sequence}`;
-        if (!imageAcks.has(key) && imageAcks.size >= 8) { fail(); return false; }
-        imageAcks.set(key, json);
-      } else if (data.type === 'ack') ack = json;
-      else if (data.type === 'audio-ack') audioAck = json;
-      else if (data.type === 'audio-ready') audioReady = json;
-      else if (data.type === 'ping') ping = json;
-      else if (data.type === 'rtc-feedback') feedback = json;
-      else if (data.type === 'viewport') viewport = json;
-      else if (data.type === 'location') locationFix = json;
-      else if (data.type === 'touch' || data.type === 'input') {
-        const tail = touches[touches.length - 1];
-        // Only consecutive moves may be replaced; never cross a down/up/release boundary.
-        if (kind === 'move' && tail && tail.kind === 'move' && tail.type === data.type && tail.eventKind === data.kind) tail.json = json;
-        else if (touches.length < 64) touches.push({ kind, json, type: data.type, eventKind: data.kind });
-        else { fail(); return false; }
-      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'vcs-start', 'vcs-ready', 'vcs-fallback', 'vcs-feedback', 'vcs-keyframe', 'phone-connect', 'image-format', 'location-start', 'location-stop', 'location-clear', 'media', 'media-command', 'browser-appearance'].includes(data.type)) {
-        if (signals.length >= 8 || json.length > 32768) { fail(); return false; }
-        if (data.type.startsWith('location-')) locationFix = null;
-        signals.push(json);
-      } else return false;
-      flush();
-      return !closed;
-    },
-    close,
-  };
-}
-
-// The head unit's own light/dark preference is the only appearance signal a browser exposes.
-// "Follow browser" turns that media query into CarPlay's night mode, so the page reports it on
-// every (re)connect, whenever it flips, and whenever the page is shown again: a head unit normally
-// leaves the page to change its appearance, and not every embedded Chromium delivers the `change`
-// event for that. A browser without the media query reports nothing, leaving the phone on the
-// Android value instead of forcing one appearance.
-export function createAppearanceReporter({
-  send, query = () => window.matchMedia('(prefers-color-scheme: dark)'), onChange = () => {},
-} = {}) {
-  let media = null, attached = false;
-  function report() {
-    if (!media) return;
-    const dark = Boolean(media.matches);
-    onChange(dark);
-    send({ type: 'browser-appearance', dark });
-  }
-  function attach() {
-    if (attached) return;
-    try { media = query() || null; } catch (_) { media = null; }
-    if (!media) return;
-    if (typeof media.addEventListener === 'function') media.addEventListener('change', report);
-    else if (typeof media.addListener === 'function') media.addListener(report);
-    attached = true;
-  }
-  return {
-    open() { attach(); report(); },
-    // Re-read when the page is shown again; never deduplicated, because a reconnected socket has
-    // no memory of what the previous connection reported.
-    refresh() { attach(); report(); },
-    close() {
-      if (!media) return;
-      if (typeof media.removeEventListener === 'function') media.removeEventListener('change', report);
-      else if (typeof media.removeListener === 'function') media.removeListener(report);
-      media = null; attached = false;
-    },
-  };
-}
-
-// Verification bridge for head-unit steering wheel media keys. Chrome only hands those keys to
-// the tab that owns the platform media session, so this registers the handlers and reports every
-// action back over the control socket: the phone log then separates "the key never reached the
-// page" from "the page got it but the rest of the chain failed". No playback control yet.
-// Publishes the head unit media card (title, artist, artwork) and, when keys are enabled, forwards
-// platform media keys over the control socket. Metadata is always published; `?ms=1` only adds the
-// action handlers, because forwarding a key is a behaviour change while a label is not.
-export function createMediaSessionProbe({
-  session = typeof navigator !== 'undefined' ? navigator.mediaSession : null,
-  send, onAction = () => {}, now = () => Date.now(), handlers = true,
-  actions = ['play', 'pause', 'nexttrack', 'previoustrack', 'seekbackward', 'seekforward'],
-} = {}) {
-  if (!session || typeof session.setActionHandler !== 'function') {
-    return { available: false, last: null, apply() {} };
-  }
-  let last = null, artwork = null;
-  let fields = { title: 'WheelPlay', artist: 'CarPlay' };
-  function publish() {
-    try {
-      const metadata = artwork
-        ? { ...fields, artwork: [{ src: artwork, sizes: '512x512', type: 'image/jpeg' }] }
-        : fields;
-      session.metadata = typeof MediaMetadata === 'function' ? new MediaMetadata(metadata) : metadata;
-      // Chrome releases the platform session as soon as a page reports "paused", and the head unit
-      // then stops delivering the key, so a key-forwarding session always claims to be playing.
-      if (handlers) session.playbackState = 'playing';
-    } catch (_) {}
-  }
-  function apply(media = {}) {
-    if (media.title || media.artist) {
-      fields = { title: String(media.title || 'WheelPlay'), artist: String(media.artist || 'CarPlay') };
-    }
-    if (media.artwork) artwork = media.artwork;
-    publish();
-  }
-  function press(action) {
-    last = { action, at: now() }; onAction(action); send({ type: 'media', action }); publish();
-  }
-  if (handlers) {
-    for (const action of actions) {
-      try { session.setActionHandler(action, () => press(action)); } catch (_) {}
-    }
-  }
-  publish();
-  return { available: true, apply, get last() { return last; } };
-}
-
-// Keep the decoder in the DOM, outside the viewport. display:none/hidden can
-// suppress video frame callbacks on embedded browsers. drawImage copies decoded
-// frames directly; it does not read pixels back through getImageData.
-export function createVideoCanvasRenderer(video, canvas, {
-  onFrame = () => {}, onDraw = () => {}, onError = () => {},
-  requestFrame = callback => requestAnimationFrame(callback), cancelFrame = id => cancelAnimationFrame(id),
-  now = () => performance.now(),
-  // A 1 px layout box inside the viewport until the first frame. Some head-unit builds
-  // never decode a video element that is display:none or positioned offscreen.
-  keepVisible = false,
-} = {}) {
-  let context = null, running = false, generation = 0, videoCallback = null, animationCallback = null;
-  let lastVideoCallbackAt = 0, lastFrameKey = null;
-  function prepare() {
-    video.classList?.toggle('pending-video', keepVisible);
-    video.classList?.toggle('offscreen-video', !keepVisible);
-    video.hidden = false;
-  }
-  function stop() {
-    running = false; generation++;
-    if (videoCallback !== null && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(videoCallback);
-    if (animationCallback !== null) cancelFrame(animationCallback);
-    videoCallback = animationCallback = null; context = null; lastFrameKey = null;
-    video.hidden = true;
-    video.classList?.toggle('offscreen-video', false); video.classList?.toggle('pending-video', false);
-    canvas.hidden = true; canvas.width = canvas.height = 0;
-  }
-  function fail(error) { stop(); onError(error); }
-  function draw(metadata = null, stalled = false) {
-    if (!running || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
-    try {
-      const width = video.videoWidth, height = video.videoHeight;
-      const resized = canvas.width !== width || canvas.height !== height;
-      // Prefer the frame counter over currentTime, which can advance between
-      // decoded frames. Some WebRTC implementations leave this counter at zero.
-      const frames = video.getVideoPlaybackQuality?.().totalVideoFrames;
-      const time = metadata?.mediaTime ?? video.currentTime;
-      const key = !stalled && frames > 0 ? `frame:${frames}` : Number.isFinite(time) ? `time:${time}` : null;
-      if (!resized && key !== null && key === lastFrameKey) return;
-      if (resized) { canvas.width = width; canvas.height = height; }
-      context.drawImage(video, 0, 0, width, height);
-      onDraw();
-      lastFrameKey = key;
-      const first = canvas.hidden;
-      canvas.hidden = false;
-      // The layout box was only needed until a frame existed; the canvas now owns the picture.
-      if (first) { video.classList?.toggle('pending-video', false); video.classList?.toggle('offscreen-video', true); }
-      if (first || resized) onFrame(width, height);
-    } catch (error) { fail(error); }
-  }
-  function start() {
-    stop(); prepare();
-    try {
-      context = canvas.getContext('2d', { alpha: false });
-      if (!context) throw Object.assign(new Error('Canvas 2D unavailable'), { name: 'NotSupportedError' });
-      running = true; lastVideoCallbackAt = now();
-      const token = generation, current = () => running && token === generation;
-      const observe = (_, metadata) => {
-        if (!current()) return;
-        videoCallback = null; lastVideoCallbackAt = now(); draw(metadata);
-        if (current()) videoCallback = video.requestVideoFrameCallback(observe);
-      };
-      const refresh = () => {
-        if (!current()) return;
-        animationCallback = null;
-        // Also recover if offscreen playback decodes but stops being composited.
-        if (!video.requestVideoFrameCallback) draw();
-        else if (now() - lastVideoCallbackAt >= 250) draw(null, true);
-        if (current()) animationCallback = requestFrame(refresh);
-      };
-      draw();
-      if (!current()) return;
-      if (video.requestVideoFrameCallback) videoCallback = video.requestVideoFrameCallback(observe);
-      animationCallback = requestFrame(refresh);
-    } catch (error) { fail(error); }
-  }
-  return { prepare, start, stop };
-}
-
-// Every failure used to look identical from the phone; the reason now travels with the
-// fallback so one head-unit retry names the stage that failed.
-const errorName = error => String((error && error.name) || 'error').slice(0, 32);
-function isRtcErrorRetryable(error) {
-  return !['NotAllowedError', 'NotSupportedError'].includes(error?.name);
-}
-
-export function videoRendererPreference(value, legacy) {
-  return ['native', 'video-canvas', 'track-canvas'].includes(value) ? value : legacy === 'true' ? 'video-canvas' : 'native';
-}
-
-// A reader owns each VideoFrame until it is drawn or discarded, including after stop.
-export function createTrackCanvasRenderer(canvas, {
-  onReady = () => {}, onResize = () => {}, onError = () => {},
-  createProcessor = init => new MediaStreamTrackProcessor(init),
-} = {}) {
-  let generation = 0, reader = null, running = false, width = 0, height = 0, renderedFrames = 0;
-  function stop() {
-    generation++; running = false;
-    const old = reader; reader = null;
-    if (old) { try { Promise.resolve(old.cancel()).catch(() => {}); } catch (_) {} }
-    canvas.hidden = true; canvas.width = canvas.height = 0;
-  }
-  async function consume(activeReader, context, token) {
-    const current = () => running && generation === token;
-    try {
-      while (current()) {
-        const { value: frame, done } = await activeReader.read();
-        try {
-          if (!current()) break;
-          if (done) throw new Error('track-ended');
-          if (!frame || !(frame.displayWidth > 0) || !(frame.displayHeight > 0)) continue;
-          const resized = width !== frame.displayWidth || height !== frame.displayHeight;
-          if (resized) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
-          context.drawImage(frame, 0, 0, frame.displayWidth, frame.displayHeight);
-          width = frame.displayWidth; height = frame.displayHeight; renderedFrames++;
-          canvas.hidden = false;
-          if (renderedFrames === 1) onReady({ width, height });
-          else if (resized) onResize({ width, height });
-        } finally { frame?.close(); }
-      }
-    } catch (error) {
-      if (current()) {
-        // Let the receiver freeze the last picture before stop clears the canvas.
-        try { onError(error.message === 'track-ended' ? 'track-ended' : 'renderer-error', isRtcErrorRetryable(error)); }
-        finally { if (generation === token) stop(); }
-      }
-    } finally {
-      try { activeReader.releaseLock(); } catch (_) {}
-      if (reader === activeReader) reader = null;
-    }
-  }
-  return {
-    start(track) {
-      stop(); width = height = renderedFrames = 0;
-      try {
-        const context = canvas.getContext('2d', { alpha: false });
-        if (!context) throw Object.assign(new Error('Canvas 2D unavailable'), { name: 'NotSupportedError' });
-        reader = createProcessor({ track, maxBufferSize: 1 }).readable.getReader();
-        running = true;
-        void consume(reader, context, generation);
-      } catch (error) { stop(); onError('renderer-error', isRtcErrorRetryable(error)); }
-    },
-    stop,
-    snapshot: () => ({ width, height, renderedFrames, presentedFrames: null }),
-  };
-}
-
-// Video elements exist only for the two legacy renderers, and belong to one offer.
-export function createVideoRenderer(mode, canvas, {
-  createVideo, onReady = () => {}, onResize = () => {}, onError = () => {}, keepVisible = false,
-} = {}) {
-  let video = null, copy = null, frameCallback = null, generation = 0, ready = false, started = false;
-  let width = 0, height = 0, presentedFrames = null, renderedFrames = mode === 'video-canvas' ? 0 : null;
-  function report(w, h) {
-    if (!video || !w || !h) return;
-    const resized = width !== w || height !== h;
-    width = w; height = h;
-    if (!ready) {
-      ready = true;
-      if (!copy) { video.hidden = false; video.classList?.toggle('pending-video', false); }
-      onReady({ width, height });
-    } else if (resized) onResize({ width, height });
-  }
-  function stop() {
-    generation++;
-    if (copy) copy.stop(); copy = null;
-    if (video) {
-      if (frameCallback !== null) video.cancelVideoFrameCallback?.(frameCallback);
-      video.onloadeddata = video.onerror = video.onresize = null;
-      video.srcObject = null; video.classList?.toggle('pending-video', false); video.remove(); video = null;
-    }
-    frameCallback = null;
-  }
-  return {
-    start(track, streams = []) {
-      stop(); ready = started = false; width = height = 0; presentedFrames = null;
-      renderedFrames = mode === 'video-canvas' ? 0 : null;
-      try {
-        video = createVideo();
-        // Until the first frame, keep the 1 px layout box when the head unit needs one.
-        if (keepVisible) { video.classList?.toggle('pending-video', true); video.hidden = false; }
-        const token = generation, current = () => video !== null && token === generation;
-        if (mode === 'video-canvas') {
-          copy = createVideoCanvasRenderer(video, canvas, {
-            onDraw: () => { renderedFrames++; }, onFrame: report, keepVisible,
-            onError: error => { if (current()) onError('renderer-error', isRtcErrorRetryable(error)); },
-          });
-          copy.prepare();
-        }
-        const displayed = () => {
-          if (!current() || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
-          if (copy) { if (!started) { started = true; copy.start(); } }
-          else report(video.videoWidth, video.videoHeight);
-        };
-        video.onloadeddata = displayed;
-        video.onresize = () => { if (current() && !copy) displayed(); };
-        video.onerror = () => { if (current()) onError('decode-error'); };
-        if (video.requestVideoFrameCallback) {
-          let firstPresented = null;
-          presentedFrames = 0;
-          const observe = (_, metadata) => {
-            if (!current()) return;
-            if (firstPresented === null) firstPresented = metadata.presentedFrames;
-            presentedFrames = metadata.presentedFrames - firstPresented;
-            if (!copy) displayed();
-            if (current()) frameCallback = video.requestVideoFrameCallback(observe);
-          };
-          frameCallback = video.requestVideoFrameCallback(observe);
-        }
-        video.srcObject = streams[0] || new MediaStream([track]);
-        Promise.resolve(video.play()).then(displayed).catch(error => { if (current()) onError(`play:${errorName(error)}`, isRtcErrorRetryable(error)); });
-      } catch (error) { onError('renderer-error', isRtcErrorRetryable(error)); }
-    },
-    stop,
-    snapshot: () => ({ width, height, presentedFrames, renderedFrames }),
-  };
-}
-
-// Video WebRTC remains receive-only. Browser audio uses the paired WebSocket.
-// `experiment` runs the head-unit Bluetooth diagnostics in this page (see BROWSER_AUDIO.md):
-// `noanswer` parses the offer but never answers, `inactive` answers with the media direction held
-// back - together they tell apart offer parsing, transport setup and media flow as the trigger.
-export function createRtcReceiver(createRenderer, {
-  send, onReady = () => {}, onStop = () => {}, onStats = () => {},
-  onResize = () => {}, onReset = () => {}, experiment = '',
-  createPeer = () => new RTCPeerConnection({ iceServers: [] }),
-  supportsCodec = codec => {
-    if (typeof RTCRtpReceiver === 'undefined' || !RTCRtpReceiver.getCapabilities) return true;
-    const caps = RTCRtpReceiver.getCapabilities('video');
-    const codecs = (caps && caps.codecs) || [];
-    // Some head units only populate the list after setRemoteDescription. An empty list is not
-    // evidence of absence, so let the SDP answer report an unsupported media section instead.
-    if (!codecs.length) return true;
-    return codecs.some(c => c.mimeType.toLowerCase() === `video/${codec.toLowerCase()}`);
-  },
-  schedule = setTimeout, cancel = clearTimeout, now = () => Date.now(),
-} = {}) {
-  let renderer = null, track = null, previousStats = null, renderStalledSince = null, lastRendered = 0;
-  let codec = 'H264', lastReason = null;
-  let peer = null, id = null, generation = 0, timeout = null, gathering = null, statsTimer = null, ready = false;
-  let lastDecoded = 0, sent = 0, lastSentAt = 0, sentAtLastProgress = 0;
-  let stalledSince = null, statsFailedSince = null, disconnectTimer = null, recoveryGraceMs = 10000;
-  function diagnostics() {
-    let codecs = [];
-    try {
-      if (typeof RTCRtpReceiver !== 'undefined' && RTCRtpReceiver.getCapabilities) {
-        const all = (RTCRtpReceiver.getCapabilities('video') || {}).codecs || [];
-        // One entry per mime: Chrome lists every H.264 profile separately, which used to push
-        // H265/AV1 out of the 12-entry window and made the diag line look incomplete.
-        const seen = new Set();
-        codecs = all.filter(entry => {
-          const mime = String(entry.mimeType || '').toLowerCase();
-          if (!mime || seen.has(mime)) return false;
-          seen.add(mime); return true;
-        }).slice(0, 12).map(entry => `${entry.mimeType}${entry.sdpFmtpLine ? ` ${entry.sdpFmtpLine}` : ''}`.slice(0, 96));
-      }
-    } catch (_) { codecs = []; }
-    const snapshot = {
-      ua: String((typeof navigator !== 'undefined' && navigator.userAgent) || '').slice(0, 128),
-      hasPc: typeof RTCPeerConnection !== 'undefined',
-      hasRvfc: typeof HTMLVideoElement !== 'undefined' && Boolean(HTMLVideoElement.prototype.requestVideoFrameCallback),
-      hasStats: typeof RTCPeerConnection !== 'undefined' && Boolean(RTCPeerConnection.prototype && RTCPeerConnection.prototype.getStats),
-      dpr: typeof devicePixelRatio === 'number' ? Math.round(devicePixelRatio * 100) / 100 : 0,
-      viewport: `${typeof innerWidth === 'number' ? innerWidth : 0}x${typeof innerHeight === 'number' ? innerHeight : 0}`,
-      screen: typeof screen !== 'undefined' ? `${screen.width}x${screen.height}` : '0x0',
-    };
-    // The whole snapshot stays under 1 KB; trim codecs first, never the capability flags.
-    while (codecs.length > 0 && JSON.stringify({ ...snapshot, codecs }).length > 1024) codecs = codecs.slice(0, -1);
-    return { ...snapshot, codecs };
-  }
-  function close() {
-    generation++; cancel(timeout); cancel(gathering); cancel(statsTimer); cancel(disconnectTimer);
-    timeout = null; gathering = null; statsTimer = null; disconnectTimer = null;
-    stalledSince = null; statsFailedSince = null;
-    renderStalledSince = null;
-    const old = peer; peer = null; ready = false; id = null;
-    onReset();
-    if (renderer) renderer.stop(); renderer = null;
-    if (track) { track.onended = null; track.stop(); track = null; }
-    previousStats = null; lastRendered = 0;
-    if (old) { old.ontrack = old.onconnectionstatechange = old.onicegatheringstatechange = null; old.close(); }
-  }
-  function fallback(reason = 'connection-failed', retryable = true) {
-    const current = id;
-    if (current === null) return;
-    lastReason = reason;
-    // A first-frame timeout is ambiguous on a head unit: name the peer states before close() so
-    // the phone can tell an ICE that never completed from a stream that arrived but never decoded.
-    const states = reason === 'first-frame-timeout' && peer
-      ? { conn: peer.connectionState, ice: peer.iceConnectionState, gather: peer.iceGatheringState,
-          ...(track ? { track: 1 } : {}) }
-      : {};
-    close(); onStop(reason);
-    send({ type: 'rtc-fallback', id: current, reason, ...states, ...(retryable ? {} : { retryable: false }) });
-  }
-  async function receive(message) {
-    if (message.type === 'rtc-stop') {
-      if (message.id === id) { close(); onStop('server-stop'); }
-      return;
-    }
-    if (message.type !== 'rtc-offer') return;
-    close(); id = message.id; codec = message.codec === 'H265' ? 'H265' : 'H264';
-    recoveryGraceMs = [4000, 10000, 30000].includes(message.recoveryGraceMs) ? message.recoveryGraceMs : 10000;
-    const token = generation, current = () => generation === token && peer !== null;
-    // One capability snapshot per offer: a head unit without remote debugging can still
-    // report what it supports and whether the WebRTC APIs exist at all.
-    send({ type: 'rtc-diag', id, ...diagnostics() });
-    if (!supportsCodec(codec)) { fallback('codec-unsupported', false); return; }
-    // `?rtcexp=noanswer` stops after parsing: no peer is created, so nothing on the car can run.
-    if (experiment === 'noanswer') {
-      timeout = schedule(() => { if (generation === token) fallback('exp:noanswer'); }, 15000);
-      return;
-    }
-    timeout = schedule(() => { if (generation === token)
-      fallback(experiment === 'inactive' ? 'exp:inactive-first-frame' : 'first-frame-timeout');
-    }, Math.max(10000, recoveryGraceMs));
-    try {
-      const pc = createPeer(); peer = pc;
-      const displayed = size => {
-        if (!current() || ready || !size.width || !size.height) return;
-        ready = true; cancel(timeout); timeout = null;
-        // The last failed attempt stays visible while retrying, but a working stream must not
-        // keep showing that old reason next to its own fps.
-        lastReason = null;
-        lastDecoded = 0; sent = 0; sentAtLastProgress = 0; lastSentAt = now();
-        lastRendered = renderer?.snapshot().renderedFrames ?? 0;
-        send({ type: 'rtc-ready', id }); onReady(size);
-        if (current()) statsTimer = schedule(sample, 1000);
-      };
-      const sample = async () => {
-        if (!current()) return;
-        try {
-          const report = await pc.getStats();
-          if (!current()) return;
-          statsFailedSince = null;
-          report.forEach(stat => {
-            if (!current()) return;
-            if (stat.type !== 'inbound-rtp' || (stat.kind || stat.mediaType) !== 'video') return;
-            const decoded = stat.framesDecoded || 0, at = now();
-            const output = renderer.snapshot();
-            const presented = output.presentedFrames;
-            const rendered = output.renderedFrames;
-            if (rendered === null || rendered !== lastRendered || sent <= sentAtLastProgress || at - lastSentAt >= 2000) {
-              renderStalledSince = null;
-            } else if (renderStalledSince === null) renderStalledSince = at;
-            lastRendered = rendered;
-            if (decoded !== lastDecoded || sent <= sentAtLastProgress || at - lastSentAt >= 2000) {
-              stalledSince = null; sentAtLastProgress = sent;
-            } else if (stalledSince === null) stalledSince = at;
-            const previous = previousStats;
-            const elapsed = previous ? Math.max(1, at - previous.at) : 0;
-            const delta = key => previous && Number.isFinite(stat[key]) && Number.isFinite(previous.stat[key])
-              ? Math.max(0, stat[key] - previous.stat[key]) : null;
-            const rate = key => elapsed && delta(key) !== null ? delta(key) * 1000 / elapsed : null;
-            const averageMs = (total, count) => delta(count) > 0 && delta(total) !== null ? delta(total) * 1000 / delta(count) : null;
-            let rttMs = null;
-            report.forEach(entry => {
-              if (entry.type === 'candidate-pair' && entry.state === 'succeeded' && entry.nominated && Number.isFinite(entry.currentRoundTripTime)) rttMs = entry.currentRoundTripTime * 1000;
-            });
-            const metrics = {
-              receivedFps: rate('framesReceived'), decodedFps: rate('framesDecoded'),
-              presentedFps: presented !== null && previous?.presented !== null && elapsed ? Math.max(0, presented - previous.presented) * 1000 / elapsed : null,
-              renderedFps: rendered !== null && previous?.rendered !== null && elapsed ? Math.max(0, rendered - previous.rendered) * 1000 / elapsed : null,
-              renderedFrames: rendered,
-              decodeMs: averageMs('totalDecodeTime', 'framesDecoded'),
-              jitterBufferMs: averageMs('jitterBufferDelay', 'jitterBufferEmittedCount'),
-              processingMs: averageMs('totalProcessingDelay', 'framesDecoded'),
-              dropped: delta('framesDropped'), lost: delta('packetsLost'), nack: delta('nackCount'),
-              bitrateMbps: rate('bytesReceived') === null ? null : rate('bytesReceived') * 8 / 1e6,
-              rttMs,
-            };
-            onStats(metrics.presentedFps ?? metrics.decodedFps, metrics);
-            if (!current()) return;
-            send({ type: 'rtc-feedback', id, packets: Math.max(0, stat.packetsReceived || 0),
-              lost: Math.max(0, stat.packetsLost || 0), decoded, nack: Math.max(0, stat.nackCount || 0), rttMs });
-            previousStats = { at, stat, presented, rendered };
-            lastDecoded = decoded;
-            // Static CarPlay screens legitimately stop producing frames.
-            if (stalledSince !== null && at - stalledSince >= recoveryGraceMs) fallback('decode-stall');
-            else if (renderStalledSince !== null && at - renderStalledSince >= recoveryGraceMs) fallback('render-stalled');
-          });
-        } catch (_) {
-          if (current()) {
-            if (statsFailedSince === null) statsFailedSince = now();
-            if (now() - statsFailedSince >= recoveryGraceMs) fallback('stats-unavailable');
-          }
-        }
-        if (current()) statsTimer = schedule(sample, 1000);
-      };
-      renderer = createRenderer({
-        onReady: displayed,
-        onResize: size => { if (current()) onResize(size); },
-        onError: (reason, retryable) => { if (current()) fallback(reason, retryable); },
-      });
-      pc.onconnectionstatechange = () => {
-        if (!current()) return;
-        if (['failed', 'closed'].includes(pc.connectionState)) { fallback(`connection:${pc.connectionState}`); return; }
-        if (pc.connectionState === 'disconnected') {
-          if (disconnectTimer === null) {
-            const timer = schedule(() => {
-              if (current() && disconnectTimer === timer && pc.connectionState !== 'connected') fallback('disconnect-timeout');
-            }, recoveryGraceMs);
-            disconnectTimer = timer;
-          }
-        } else if (pc.connectionState === 'connected') {
-          cancel(disconnectTimer); disconnectTimer = null;
-        }
-      };
-      pc.ontrack = event => {
-        if (!current()) return;
-        if (track) { fallback('track-replaced'); return; }
-        track = event.track;
-        track.onended = () => { if (current()) fallback('track-ended'); };
-        renderer.start(track, event.streams);
-      };
-      try { await pc.setRemoteDescription({ type: 'offer', sdp: message.sdp }); }
-      catch (error) { if (generation === token) fallback(`offer:${errorName(error)}`, isRtcErrorRetryable(error)); return; }
-      if (!current()) return;
-      let answer;
-      try { answer = await pc.createAnswer(); }
-      catch (error) { if (generation === token) fallback(`answer:${errorName(error)}`, isRtcErrorRetryable(error)); return; }
-      if (!current()) return;
-      if (/^m=video 0(?: |\r?$)/m.test(answer.sdp)) { fallback('codec-rejected', false); return; }
-      // `?rtcexp=inactive` holds the media direction back: ICE and DTLS still establish but no RTP
-      // flows, so a Bluetooth drop then names transport setup rather than media flow as the trigger.
-      const rewritten = experiment === 'inactive'
-        ? answer.sdp.replace(/a=(?:sendrecv|recvonly|sendonly)/g, 'a=inactive') : answer.sdp;
-      // Use the browser as DTLS server: Mbed TLS 3.6 cannot reassemble a fragmented
-      // ClientHello from newer Chrome versions. Passive is a standard answer role.
-      const passive = { type: answer.type, sdp: rewritten.replace(/a=setup:active/g, 'a=setup:passive') };
-      try { await pc.setLocalDescription(passive); }
-      catch (_) {
-        // Some head-unit builds reject a rewritten DTLS role; keep the generated answer.
-        try { await pc.setLocalDescription(answer); }
-        catch (error) { if (generation === token) fallback(`local-desc:${errorName(error)}`, isRtcErrorRetryable(error)); return; }
-      }
-      if (!current()) return;
-      // One line of negotiation facts about the answer we are about to send. The full SDP stays
-      // on the LAN, but `m=video 0`, the codec fmtp and the candidate mix are what explain a
-      // rejection from a head unit with no reachable console.
-      const answerSummary = sdp => {
-        const lines = String(sdp || '').split(/\r?\n/).map(line => line.trim());
-        const media = lines.find(line => line.startsWith('m=video ')) || '';
-        const fields = media.replace(/^m=video\s+/, '').split(/\s+/).filter(Boolean);
-        const payload = fields[2] || '';
-        const rtpmap = lines.find(line => line.startsWith(`a=rtpmap:${payload} `)) || '';
-        const fmtp = lines.find(line => line.startsWith(`a=fmtp:${payload} `)) || '';
-        const codecLine = `${rtpmap.replace('a=rtpmap:', '').replace(`${payload} `, '')} ${fmtp.replace('a=fmtp:', '').replace(`${payload} `, '')}`.trim();
-        const setup = lines.find(line => line.startsWith('a=setup:')) || '';
-        let host = 0, srflx = 0, relay = 0, mdns = 0;
-        for (const line of lines) {
-          if (!line.startsWith('a=candidate:')) continue;
-          const parts = line.slice('a=candidate:'.length).split(/\s+/).filter(Boolean);
-          if ((parts[4] || '').toLowerCase().endsWith('.local')) mdns++;
-          if (parts[7] === 'host') host++;
-          else if (parts[7] === 'srflx') srflx++;
-          else if (parts[7] === 'relay') relay++;
-        }
-        return {
-          media: fields.length ? `video:${fields[0]}` : 'none',
-          codecs: codecLine.slice(0, 200),
-          setup: setup.replace('a=setup:', '') || 'none',
-          candidates: `host:${host},srflx:${srflx},relay:${relay},mdns:${mdns}`,
-        };
-      };
-      let answered = false;
-      const answerReady = (force = false) => {
-        if (answered || !current() || !pc.localDescription) return;
-        if (!force && pc.iceGatheringState !== 'complete') return;
-        answered = true; cancel(gathering); gathering = null;
-        pc.onicegatheringstatechange = null;
-        const sdp = pc.localDescription.sdp;
-        send({ type: 'rtc-answer', id, sdp });
-        send({ type: 'rtc-diag', id, answer: answerSummary(sdp) });
-      };
-      if (pc.iceGatheringState === 'complete') answerReady();
-      else {
-        pc.onicegatheringstatechange = () => answerReady();
-        // Head units that never report completion would otherwise reach the first-frame
-        // timeout with no answer sent at all; send what has been gathered.
-        gathering = schedule(() => {
-          if (generation !== token) return;
-          // setLocalDescription succeeded, so this only fails on a browser that produced an
-          // answer without an SDP; name it instead of waiting for the first-frame timeout.
-          if (!pc.localDescription) { fallback('gathering-timeout'); return; }
-          answerReady(true);
-        }, 3000);
-      }
-    } catch (error) {
-      if (generation !== token) return;
-      if (error?.message === 'processor-unsupported') { fallback('processor-unsupported', false); return; }
-      fallback(`transport:${errorName(error)}`, isRtcErrorRetryable(error));
-    }
-  }
-  return { receive, close, fallback, get active() { return ready; }, get codec() { return codec; },
-    get lastReason() { return lastReason; },
-    get recovering() { return ready && (disconnectTimer !== null || stalledSince !== null || renderStalledSince !== null || statsFailedSince !== null); },
-    progress(count) {
-      if (count > sent) {
-        if (now() - lastSentAt >= 2000) { stalledSince = null; renderStalledSince = null; }
-        lastSentAt = now();
-      }
-      sent = count;
-    },
-  };
-}
-
-// The WebSocket codec stream: compressed H.264 access units over the paired WebSocket, decoded by
-// WebCodecs and drawn onto the canvas. It exists for head units whose browser drops the phone's
-// Bluetooth audio link while a WebRTC media transport is active (BROWSER_AUDIO.md): the conflict
-// follows the peer connection itself, not any audio the page plays, so this path keeps Bluetooth
-// and the wheel keys while still decoding the iPhone's own H.264 instead of JPEG images.
-export const CODEC_STREAM_MAGIC = 0x31564357; // WCV1, matches CodecPacket.MAGIC
-const HEADER_BYTES = 24; // magic + sequence + pts + flags + parameter length
-export function createCodecReceiver(drawFrame, {
-  send, onReady = () => {}, onStop = () => {}, onStats = () => {}, onReset = () => {},
-  supportsCodec = config => typeof VideoDecoder === 'undefined' ? Promise.resolve(false)
-    : VideoDecoder.isConfigSupported(config).then(result => result?.supported === true)
-      .catch(() => false),
-  schedule = setTimeout, cancel = clearTimeout, now = () => Date.now(),
-} = {}) {
-  let decoder = null, id = null, generation = 0, ready = false, codec = 'H264', keySeen = false;
-  let config = null, lastSequence = null;
-  let timeout = null, statsTimer = null, recoveryGraceMs = 10000;
-  let decoded = 0, sent = 0, lastDecoded = 0, sentAtLastProgress = 0, lastSentAt = 0, stalledSince = null, fpsPrevious = null;
-  let lastReason = null;
-  function current() { return decoder !== null && generation === decoder.__token; }
-  function close() {
-    generation++; cancel(timeout); cancel(statsTimer);
-    timeout = statsTimer = null;
-    stalledSince = null; const old = decoder; decoder = null; ready = false; id = null;
-    onReset();
-    if (old) { try { old.close(); } catch (_) {} }
-  }
-  function fallback(reason = 'connection-failed', retryable = true) {
-    const currentId = id;
-    if (currentId === null) return;
-    lastReason = reason;
-    close(); onStop(reason);
-    send({ type: 'vcs-fallback', id: currentId, reason, ...(retryable ? {} : { retryable: false }) });
-  }
-  function receive(message) {
-    if (message.type === 'vcs-stop') {
-      if (message.id === id) { close(); onStop('server-stop'); }
-      return;
-    }
-    if (message.type !== 'vcs-start') return;
-    close(); id = message.id; codec = message.codec === 'H265' ? 'H265' : 'H264';
-    recoveryGraceMs = [4000, 10000, 30000].includes(message.recoveryGraceMs) ? message.recoveryGraceMs : 10000;
-    const token = generation;
-    if (typeof VideoDecoder === 'undefined') { fallback('codec-unsupported', false); return; }
-    // H.264 and HEVC both arrive as Annex B byte streams, so no decoder description is configured;
-    // the parameter sets (SPS/PPS, or VPS/SPS/PPS) ride inside the keyframe access units instead.
-    // The service names the exact HEVC level it negotiated; the probed strings cover a page whose
-    // service is older, or a level this decoder refuses but a nearby one it accepts.
-    const candidates = message.codec === 'H265'
-      ? [...new Set([message.webcodecs, ...HEVC_CODEC_STRINGS].filter(Boolean))]
-      : [`avc1.${message.profile}`];
-    config = null;
-    keySeen = false; lastSequence = null; fpsPrevious = null;
-    timeout = schedule(() => { if (generation === token) fallback('first-frame-timeout'); }, Math.max(10000, recoveryGraceMs));
-    const displayed = size => {
-      if (!current() || ready || !size.width || !size.height) return;
-      ready = true; cancel(timeout); timeout = null;
-      lastReason = null;
-      decoded = 0; sent = 0; sentAtLastProgress = 0; lastSentAt = now();
-      send({ type: 'vcs-ready', id }); onReady(size);
-      if (current()) statsTimer = schedule(sample, 1000);
-    };
-    const sample = () => {
-      if (!current()) return;
-      const at = now();
-      if (decoded !== lastDecoded || sent <= sentAtLastProgress || at - lastSentAt >= 2000) {
-        stalledSince = null; sentAtLastProgress = sent;
-      } else if (stalledSince === null) stalledSince = at;
-      const fps = fpsPrevious ? Math.max(0, decoded - fpsPrevious.count) * 1000 / Math.max(1, at - fpsPrevious.at) : null;
-      fpsPrevious = { at, count: decoded };
-      onStats(fps, { decodedFps: fps, decoded });
-      send({ type: 'vcs-feedback', id, decoded });
-      lastDecoded = decoded;
-      // Static CarPlay screens legitimately stop producing frames; server progress freezes with
-      // them, so the deadline only runs while the phone keeps sending (see progress).
-      if (stalledSince !== null && at - stalledSince >= recoveryGraceMs) { fallback('decode-stall'); return; }
-      if (current()) statsTimer = schedule(sample, 1000);
-    };
-    // First accepted configuration wins; a decoder that takes hvc1 may refuse hev1 and vice versa.
-    const accept = list => list.reduce((found, codecString) => found.then(hit => hit
-      ? hit
-      : supportsCodec({ codec: codecString, optimizeForLatency: true }).then(ok => ok ? codecString : null)),
-    Promise.resolve(null));
-    accept(candidates).then(codecString => {
-      if (generation !== token) return;
-      probe('support', `${codecString ?? candidates[0]}=${codecString !== null}`);
-      if (codecString === null) { fallback('codec-unsupported', false); return; }
-      config = { codec: codecString, optimizeForLatency: true };
-      try {
-        decoder = new VideoDecoder({
-          output: frame => {
-            decoded++;
-            if (decoded === 1) probe('first-output', `${frame.displayWidth}x${frame.displayHeight}`);
-            const size = { width: frame.displayWidth, height: frame.displayHeight };
-            try { drawFrame(frame); } finally { frame.close(); }
-            displayed(size);
-          },
-          error: err => { probe('decoder-error', `${err && err.name}:${err && err.message}`); if (current()) fallback('decode-error'); },
-        });
-        decoder.__token = token;
-        decoder.configure(config);
-      } catch (_) { fallback('codec-unsupported', false); }
-    });
-  }
-  // Head units have no reachable console, so the ?diag=1 panel shows the last receiver stage.
-  const probe = (stage, detail = '') => { globalThis.__vcsStage = `${stage}${detail ? ':' + detail : ''}`; };
-  function feed(buffer) {
-    if (!decoder || decoder.state !== 'configured') { probe('feed-skip', decoder ? decoder.state : 'null'); return; }
-    const view = new DataView(buffer);
-    const keyframe = view.getUint16(20, true) === 1;
-    const sequence = Number(view.getBigInt64(4, true));
-    // A sender-side drop breaks the prediction chain; only a keyframe can restart decoding.
-    if (lastSequence !== null && sequence !== lastSequence + 1 && !(keyframe && keySeen)) return;
-    if (!keyframe && !keySeen) return;
-    lastSequence = sequence;
-    if (keyframe && !keySeen) { keySeen = true; try { decoder.reset(); decoder.configure(config); } catch (_) { return; } }
-    if (lastSequence === 0) probe('first-au', `key=${keyframe} bytes=${buffer.byteLength} skip=${view.getUint16(22, true)}`);
-    try {
-      decoder.decode(new EncodedVideoChunk({
-        type: keyframe ? 'key' : 'delta',
-        timestamp: Number(view.getBigInt64(12, true)),
-        data: new Uint8Array(buffer, HEADER_BYTES),
-      }));
-    } catch (error) { probe('decode-throw', `${error && error.name}:${error && error.message}`); }
-  }
-  return { receive, feed, close, get active() { return ready; }, get codec() { return codec; },
-    get lastReason() { return lastReason; },
-    get recovering() { return ready && stalledSince !== null; },
-    progress(count) {
-      if (count > sent) {
-        if (now() - lastSentAt >= 2000) stalledSince = null;
-        lastSentAt = now();
-      }
-      sent = count;
-    },
-  };
-}
-
-// The phone status gauge: geometry, markup and in-place updates live in ./phone-gauge.js.
+import { mapPoint, pairingCodeFromUrl, unzoomedDisplayRect, browserViewportSize } from './viewport.js';
+import { createPresentationController } from './presentation.js';
+import { decodeVideoPacket, probeWebp, probeHevc } from './media-probes.js';
+import { createJpegPresenter } from './jpeg-presenter.js';
+import { createControlOutbox } from './control-outbox.js';
+import { createAppearanceReporter, createMediaSessionProbe } from './browser-appearance.js';
+import { createVideoRenderer, createTrackCanvasRenderer, videoRendererPreference } from './video-renderer.js';
+import { createRtcReceiver } from './rtc-receiver.js';
+import { createCodecReceiver, CODEC_STREAM_MAGIC } from './codec-stream.js';
 import { applyPhoneGauge, phoneGaugeValues, phoneStatusMarkup } from './phone-gauge.js';
-
 import { createBrowserAudio } from './browser-audio.js';
 import { createBrowserLocation } from './browser-location.js';
 import { createBrowserMediaSession } from './browser-media-session.js';
 
 if (typeof document !== 'undefined') {
   const $ = id => document.getElementById(id);
-  // Plain search parsing: this file also runs in test harnesses without URLSearchParams.
-  const queryFlag = name => new RegExp(`(?:^|[?&])${name}=1(?:&|$)`).test(String(location.search || ''));
-  const diagnosticStatus = queryFlag('diag');
-  const keepVideoVisible = queryFlag('unhide');
+  // Plain search parsing: this file also runs in test harnesses without URLSearchParams. The
+  // pattern argument keeps each flag's own validation (`?ms=2`, `?rtcexp=noanswer|inactive`).
+  const query = (name, pattern = '[^&]+') =>
+    (String(location.search || '').match(new RegExp(`[?&]${name}=(${pattern})(?:&|$)`)) || [])[1] || '';
+  const diagnosticStatus = query('diag', '1') !== '';
+  const keepVideoVisible = query('unhide', '1') !== '';
   // Opening the page connects automatically. `?manual=1` restores the QR/code launch page.
-  const autoLaunch = !queryFlag('manual');
+  const autoLaunch = query('manual', '1') === '';
   // `?rtcexp=noanswer|inactive` runs the Bluetooth-conflict probes inside the normal negotiation.
-  const rtcExperiment = (String(location.search || '').match(/[?&]rtcexp=(noanswer|inactive)(?:&|$)/) || [])[1] || '';
+  const rtcExperiment = query('rtcexp', 'noanswer|inactive');
   // `?ms=1` registers a Media Session; `?ms=2` additionally plays browser audio through a media
   // element, which is what Chrome requires before it routes platform media keys to the page.
-  const mediaSessionMode = (String(location.search || '').match(/[?&]ms=([12])(?:&|$)/) || [])[1] || '';
+  const mediaSessionMode = query('ms', '[12]');
   // `?audioIdle=<ms>` tunes how long the page keeps its audio output open after the last sound; 0
   // disables the release entirely for a head unit that needs a permanently open sink.
-  const audioIdleMatch = Number((String(location.search || '').match(/[?&]audioIdle=(\d+)(?:&|$)/) || [])[1]);
-  const audioIdleMillis = Number.isFinite(audioIdleMatch) && audioIdleMatch >= 0 ? audioIdleMatch : 5000;
+  const audioIdleRaw = query('audioIdle', '\\d+');
+  const audioIdleMillis = audioIdleRaw === '' ? 5000 : Math.max(0, Number(audioIdleRaw));
+  // Every persistent option funnels through here: a head unit without storage keeps session-only
+  // defaults instead of failing, and a `storageAvailable` probe decides whether pairing can be
+  // remembered across visits.
+  const storageAvailable = (() => {
+    try { window.localStorage.getItem('wheelplay.storage'); return true; } catch (_) { return false; }
+  })();
+  const storage = {
+    get(key) { try { return window.localStorage.getItem(key); } catch (_) { return null; } },
+    set(key, value) { try { window.localStorage.setItem(key, value); } catch (_) {} },
+    remove(key) { try { window.localStorage.removeItem(key); } catch (_) {} },
+  };
   const screen = $('screen');
   const screens = [screen, $('screen-next'), $('screen-third')];
   const heldFrame = $('held-frame');
@@ -1103,7 +74,7 @@ if (typeof document !== 'undefined') {
   let socket = null, stopped = true, paired = false, retry = null, attempts = 0;
   let width = 1280, height = 720, live = false, lastStatus = 0, rtcMedia = {}, codecMedia = {};
   let heartbeat = null, movePending = false, moveGeneration = 0, outbox = null;
-  let authGeneration = 0, deviceCredential = null, storageAvailable = false;
+  let authGeneration = 0, deviceCredential = null;
   let userDisconnected = false, autoRetryTimer = null;
   let launchPresentation = null;
   // Set when an automatic fullscreen request was rejected for lack of a user gesture; the next
@@ -1125,7 +96,7 @@ if (typeof document !== 'undefined') {
   let browserDarkMode = null;
   const ignoreZoomOption = $('ignore-browser-zoom');
   const ignoreZoomPreference = 'wheelplay.ignoreBrowserZoom';
-  try { ignoreZoomOption.checked = window.localStorage.getItem(ignoreZoomPreference) === 'true'; } catch (_) {}
+  ignoreZoomOption.checked = storage.get(ignoreZoomPreference) === 'true';
   function syncDisplayZoom() {
     if (!display.style) return;
     const area = ignoreZoomOption.checked && !display.hidden
@@ -1142,7 +113,7 @@ if (typeof document !== 'undefined') {
     }
   }
   ignoreZoomOption.addEventListener('change', () => {
-    try { window.localStorage.setItem(ignoreZoomPreference, String(ignoreZoomOption.checked)); } catch (_) {}
+    storage.set(ignoreZoomPreference, String(ignoreZoomOption.checked));
     release(); syncDisplayZoom(); scheduleViewportReport();
   });
   // Top-bar and fullscreen options persist across visits; defaults live in the HTML (top bar on,
@@ -1151,19 +122,17 @@ if (typeof document !== 'undefined') {
   const fullscreenOption = $('fullscreen-on-start');
   const hideToolbarPreference = 'wheelplay.hideToolbar';
   const fullscreenPreference = 'wheelplay.fullscreenOnStart';
-  try {
-    const storedHideToolbar = window.localStorage.getItem(hideToolbarPreference);
-    if (storedHideToolbar !== null) hideToolbarOption.checked = storedHideToolbar === 'true';
-    fullscreenOption.checked = window.localStorage.getItem(fullscreenPreference) === 'true';
-  } catch (_) {}
+  const storedHideToolbar = storage.get(hideToolbarPreference);
+  if (storedHideToolbar !== null) hideToolbarOption.checked = storedHideToolbar === 'true';
+  fullscreenOption.checked = storage.get(fullscreenPreference) === 'true';
   hideToolbarOption.addEventListener('change', () => {
-    try { window.localStorage.setItem(hideToolbarPreference, String(hideToolbarOption.checked)); } catch (_) {}
+    storage.set(hideToolbarPreference, String(hideToolbarOption.checked));
     if (!$('display').hidden) {
       $('topbar').hidden = hideToolbarOption.checked || Boolean(launchPresentation?.immersive);
     }
   });
   fullscreenOption.addEventListener('change', () => {
-    try { window.localStorage.setItem(fullscreenPreference, String(fullscreenOption.checked)); } catch (_) {}
+    storage.set(fullscreenPreference, String(fullscreenOption.checked));
     if (fullscreenOption.checked) {
       // The toggle itself is a user gesture, so this request is allowed right here.
       immersiveRetry = false;
@@ -1191,23 +160,24 @@ if (typeof document !== 'undefined') {
   const rendererPreference = 'wheelplay.videoRenderer';
   let selectedMode = 'native';
   try {
-    selectedMode = videoRendererPreference(window.localStorage.getItem(rendererPreference), window.localStorage.getItem('wheelplay.canvasVideo'));
-    window.localStorage.setItem(rendererPreference, selectedMode);
+    selectedMode = videoRendererPreference(storage.get(rendererPreference), storage.get('wheelplay.canvasVideo'));
+    storage.set(rendererPreference, selectedMode);
   } catch (_) {}
   let launchMode = selectedMode;
+  const RENDERER_MODES = ['native', 'video-canvas', 'track-canvas'];
   const processorSupported = () => typeof MediaStreamTrackProcessor === 'function';
   function updateRendererOptions() {
-    for (const mode of ['native', 'video-canvas', 'track-canvas']) {
+    for (const mode of RENDERER_MODES) {
       $(`renderer-${mode}`).checked = selectedMode === mode;
       $(`renderer-${mode}-card`).classList.toggle('selected', selectedMode === mode);
     }
     $('renderer-hint').hidden = selectedMode !== 'track-canvas' || processorSupported();
   }
-  for (const mode of ['native', 'video-canvas', 'track-canvas']) {
+  for (const mode of RENDERER_MODES) {
     $(`renderer-${mode}`).addEventListener('change', () => {
       if (!$(`renderer-${mode}`).checked) return;
       selectedMode = mode; updateRendererOptions();
-      try { window.localStorage.setItem(rendererPreference, mode); } catch (_) {}
+      storage.set(rendererPreference, mode);
     });
   }
   updateRendererOptions();
@@ -1219,13 +189,22 @@ if (typeof document !== 'undefined') {
     display.insertBefore(video, canvas); bindSurface(video);
     return video;
   }
-  function showRtcSize(size) {
-    if (!presentation.present(rtcMedia, size.width, size.height, 'rtc', rtcMedia.revision)) return;
+  // Both video transports repaint through the same path; only their snapshot slot differs.
+  function showStreamSize(kind, media, size) {
+    if (!presentation.present(media, size.width, size.height, kind, media.revision)) return;
     width = size.width; height = size.height; jpeg.cancelPending(); jpeg.hide(); clearHeldFrame();
   }
-  function showCodecSize(size) {
-    if (!presentation.present(codecMedia, size.width, size.height, 'codec', codecMedia.revision)) return;
-    width = size.width; height = size.height; jpeg.cancelPending(); jpeg.hide(); clearHeldFrame();
+  function showRtcSize(size) { showStreamSize('rtc', rtcMedia, size); }
+  function showCodecSize(size) { showStreamSize('codec', codecMedia, size); }
+  // A start message claims a presentation slot only when the controller accepts it; switching
+  // revisions drops the still-image presenter's pending work so the new transport wins cleanly.
+  // A rejected start also abandons the transport itself, exactly like the handler's early return.
+  function acceptMediaStart(data, assign) {
+    const previousRevision = presentation.current.revision;
+    if (!presentation.accepts(data)) return false;
+    if (previousRevision !== presentation.current.revision) jpeg.cancelPending();
+    assign({ ...data, revision: presentation.current.revision });
+    return true;
   }
   const pairApi = async (path, request = null) => {
     const headers = request?.token ? { 'X-Pair-Token': request.token } :
@@ -1245,8 +224,7 @@ if (typeof document !== 'undefined') {
     } finally { clearTimeout(timeout); }
   };
   try {
-    const stored = window.localStorage.getItem(devicePreference);
-    storageAvailable = true;
+    const stored = storage.get(devicePreference);
     if (stored) {
       const device = JSON.parse(stored);
       if (typeof device.id === 'string' && typeof device.secret === 'string' && device.id.length === 32 && device.secret.length === 32) deviceCredential = device;
@@ -1284,7 +262,7 @@ if (typeof document !== 'undefined') {
         const device = await pairApi('remember', { token });
         if (generation !== authGeneration) return;
         deviceCredential = device;
-        window.localStorage.setItem(devicePreference, JSON.stringify(device));
+        storage.set(devicePreference, JSON.stringify(device));
         name = device.name;
       } catch (_) {
         message = t("web_paired_for_this_session_but_the_device_could_not");
@@ -1315,7 +293,7 @@ if (typeof document !== 'undefined') {
         if (generation !== authGeneration) return;
         if (error.status === 401) {
           deviceCredential = null;
-          try { window.localStorage.removeItem(devicePreference); } catch (_) {}
+          storage.remove(devicePreference);
           $('message').textContent = t("web_remembered_device_expired_or_removed_pair_again");
         } else {
           showPairingReady(deviceCredential.name || t("web_remembered_browser"));
@@ -1549,7 +527,11 @@ if (typeof document !== 'undefined') {
     const hevcState = hevcCodec === undefined ? '?' : hevcCodec ? `1:${hevcCodec.slice(0, 4)}` : 0;
     const capabilityDetail = `cap secure=${window.isSecureContext ? 1 : 0} vd=${typeof VideoDecoder === 'function' ? 1 : 0}` +
       ` hevc=${hevcState}` +
-      (serverVcsHint ? ` vcs=${serverVcsHint}` : '') + ` cs=${globalThis.__vcsStage || '-'}`;
+      (serverVcsHint ? ` vcs=${serverVcsHint}` : '') +
+      ` last=${codec?.lastReason || '-'}` +
+      ` startId=${globalThis.__vcsStartId ?? '-'} skips=${globalThis.__vcsFeedSkips || 0}` +
+      ` closes=${globalThis.__vcsCloses ?? '-'} rejects=${globalThis.__vcsRejects || 0}` +
+      ` cs=${(globalThis.__vcsTrail || [globalThis.__vcsStage || '-']).join(' > ')}`;
     const detail = [serverRtcDiag, videoDetail || imageDetail, capabilityDetail, mediaSessionMode
       // The probe line is the evidence for whether the head unit delivers wheel keys at all.
       ? `ms=${mediaSessionMode} api=${mediaProbe?.available ? 1 : 0}` +
@@ -1635,6 +617,15 @@ if (typeof document !== 'undefined') {
       Promise.resolve(document.documentElement.requestFullscreen()).catch(() => { immersiveRetry = true; });
     } catch (_) {}
   });
+  // Every teardown path - an explicit disconnect, a socket drop, a page hide - releases the same
+  // resources in the same order; keeping it in one function is what keeps the paths in step.
+  function teardownSession() {
+    presentation.close(); cleanupRtc(); cleanupImage();
+    browserMedia.close(); browserAudio.close();
+    browserAppearance.close(); browserLocation.close();
+    renderPhoneStatus(null);
+    $('audio-message').hidden = true;
+  }
   function disconnect(refreshQr = true) {
     stopQr();
     authGeneration++;
@@ -1643,11 +634,7 @@ if (typeof document !== 'undefined') {
     if (outbox) { outbox.close(); outbox = null; }
     clearTimeout(retry); clearInterval(heartbeat);
     if (socket) { const old = socket; socket = null; old.close(); }
-    presentation.close(); cleanupRtc(); cleanupImage();
-    browserMedia.close(); browserAudio.close(); $('audio-message').hidden = true;
-    browserAppearance.close();
-    browserLocation.close();
-    renderPhoneStatus(null);
+    teardownSession();
     $('topbar').hidden = false; $('pairing').hidden = false; $('display').hidden = true;
     syncDisplayZoom();
     $('disconnect').hidden = true; $('connect').disabled = false;
@@ -1678,7 +665,7 @@ if (typeof document !== 'undefined') {
   settingsScrim.addEventListener('click', () => setSettingsOpen(false));
   // Debug-mode entry at the bottom of the drawer: toggles ?diag=1 on the current address and
   // keeps every other query parameter intact; credentials live in localStorage and survive it.
-  const diagMode = /[?&]diag=/.test(String(location.search || ''));
+  const diagMode = query('diag', '[^&]*') !== '';
   const diagToggle = $('diag-toggle');
   diagToggle.textContent = t(diagMode ? 'web_exit_debug_mode' : 'web_enter_debug_mode');
   diagToggle.addEventListener('click', () => {
@@ -1707,7 +694,7 @@ if (typeof document !== 'undefined') {
 
   function storedBadgePosition() {
     try {
-      const saved = JSON.parse(window.localStorage.getItem(badgePositionPreference) || 'null');
+      const saved = JSON.parse(storage.get(badgePositionPreference) || 'null');
       return saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : null;
     } catch (_) { return null; }
   }
@@ -1750,10 +737,7 @@ if (typeof document !== 'undefined') {
     statusBadge.releasePointerCapture?.(event.pointerId);
     statusBadge.classList.remove('dragging');
     if (badgeDrag.moved) {
-      try {
-        window.localStorage.setItem(badgePositionPreference, JSON.stringify(
-          { x: statusBadge.offsetLeft, y: statusBadge.offsetTop }));
-      } catch (_) {}
+      storage.set(badgePositionPreference, JSON.stringify({ x: statusBadge.offsetLeft, y: statusBadge.offsetTop }));
     } else {
       // A tap opens the settings drawer; a double tap only resets the disc position.
       const now = Date.now();
@@ -1767,7 +751,7 @@ if (typeof document !== 'undefined') {
   statusBadge.addEventListener('pointerup', endBadgeDrag);
   statusBadge.addEventListener('pointercancel', endBadgeDrag);
   statusBadge.addEventListener('dblclick', () => {
-    try { window.localStorage.removeItem(badgePositionPreference); } catch (_) {}
+    storage.remove(badgePositionPreference);
     statusBadge.style.left = statusBadge.style.top = statusBadge.style.right = '';
   });
   window.addEventListener('resize', restoreBadgePosition);
@@ -1904,31 +888,39 @@ if (typeof document !== 'undefined') {
         if (browserAudio.control(data)) return;
         if (data.type === 'rtc-offer' || data.type === 'rtc-stop') {
           if (data.type === 'rtc-stop') rtcRequested = false;
-          else {
-            const previousRevision = presentation.current.revision;
-            if (!presentation.accepts(data)) return;
-            if (previousRevision !== presentation.current.revision) jpeg.cancelPending();
-            rtcMedia = { ...data, revision: presentation.current.revision };
-          }
+          else if (!acceptMediaStart(data, media => { rtcMedia = media; })) return;
           rtc.receive(data); return;
         }
-        if (data.type === 'vcs-start' || data.type === 'vcs-stop') {
-          if (data.type === 'vcs-stop') codecRequested = false;
-          else {
-            const previousRevision = presentation.current.revision;
-            if (!presentation.accepts(data)) return;
-            if (previousRevision !== presentation.current.revision) jpeg.cancelPending();
-            codecMedia = { ...data, revision: presentation.current.revision };
-          }
-          codec.receive(data); return;
+      if (data.type === 'vcs-start' || data.type === 'vcs-stop') {
+        if (data.type === 'vcs-stop') {
+          codecRequested = false;
+        } else if (!acceptMediaStart(data, media => { codecMedia = media; })) {
+          // Head units have no console: leave a breadcrumb the ?diag=1 panel can show. A rejected
+          // start is the one failure that produces no other trace - no decoder, no fallback reply.
+          const cur = presentation.current;
+          globalThis.__vcsRejects = (globalThis.__vcsRejects || 0) + 1;
+          globalThis.__vcsStage = `handler-reject epoch=${data.videoEpoch}/${data.sessionId} cur=${cur.videoEpoch}/${cur.sessionId}`;
+          return;
         }
+        codec.receive(data); return;
+      }
         if (data.type === 'phone-connect-result') {
           $('phone-connect').disabled = false;
           $('phone-connect-message').textContent = data.message;
           return;
         }
         if (data.type === 'busy') {
-          const message = data.message; disconnect(); $('message').textContent = message; return;
+          // Another head unit already owns the stream. Re-entering the auto-launch cycle here
+          // would bounce between connecting and busy forever - the flicker a second browser
+          // shows while the first one stays connected, with no backoff because disconnect()
+          // resets the retry counters. Hold the landing page with the reason instead; the
+          // retry button is the way back in once the other head unit leaves.
+          const message = data.message;
+          userDisconnected = true;
+          disconnect();
+          $('status').textContent = message;
+          $('message').textContent = message;
+          return;
         }
         if (data.type === 'status') {
           serverRtcHint = data.rtcHint || '';
@@ -2008,11 +1000,8 @@ if (typeof document !== 'undefined') {
       if (outbox) { outbox.close(); outbox = null; }
       cancelMove();
       socket = null; pointers.clear(); desktop.release(false); pointerInput = false; keyboardInput = false; backButton = false; $('desktop-back').hidden = true;
-      clearInterval(heartbeat); presentation.close(); cleanupRtc(); cleanupImage();
-      browserMedia.close(); browserAudio.close(); $('audio-message').hidden = true;
-      browserAppearance.close();
-      browserLocation.close();
-      renderPhoneStatus(null);
+      clearInterval(heartbeat);
+      teardownSession();
       if (stopped) return;
       if (!paired || ++attempts > 8) {
         disconnect(); $('status').textContent = t("web_could_not_connect");
@@ -2064,7 +1053,7 @@ if (typeof document !== 'undefined') {
         $('connect').disabled = false;
         if (error.status === 401 && deviceCredential) {
           pairingToken = null; deviceCredential = null;
-          try { window.localStorage.removeItem(devicePreference); } catch (_) {}
+          storage.remove(devicePreference);
           if (autoLaunch) {
             autoRetryTimer = setTimeout(() => {
               if (generation === authGeneration) initializePairing();
@@ -2115,46 +1104,46 @@ if (typeof document !== 'undefined') {
   });
   // A separate layer prevents Android Chrome's native video gestures cancelling drags.
   function bindSurface(surface) {
-  desktop.bind(surface);
-  surface.addEventListener('contextmenu', event => event.preventDefault());
-  surface.addEventListener('pointerdown', event => {
-    if (pointerInput && event.pointerType === 'mouse') return;
-    if (!live || pointers.size >= maxTouchContacts || (event.pointerType === 'mouse' && event.button !== 0)) return;
-    const point = mapPoint(event.clientX, event.clientY, surface.getBoundingClientRect(), width, height);
-    if (!point) return;
-    event.preventDefault();
-    const used = new Set([...pointers.values()].map(p => p.id));
-    let id = 0; while (used.has(id)) id++;
-    pointers.set(event.pointerId, { id, ...point });
-    surface.setPointerCapture(event.pointerId);
-    cancelMove();
-    send({ type: 'touch', contacts: contacts() });
-  });
-  surface.addEventListener('pointermove', event => {
-    const p = pointers.get(event.pointerId); if (!p) return;
-    const point = mapPoint(event.clientX, event.clientY, surface.getBoundingClientRect(), width, height, true);
-    if (!point) return;
-    Object.assign(p, point);
-    if (!movePending) {
-      movePending = true;
-      const generation = moveGeneration;
-      requestAnimationFrame(() => {
-        if (generation !== moveGeneration) return;
-        movePending = false;
-        if (pointers.size) send({ type: 'touch', contacts: contacts() }, 'move');
-      });
+    desktop.bind(surface);
+    surface.addEventListener('contextmenu', event => event.preventDefault());
+    surface.addEventListener('pointerdown', event => {
+      if (pointerInput && event.pointerType === 'mouse') return;
+      if (!live || pointers.size >= maxTouchContacts || (event.pointerType === 'mouse' && event.button !== 0)) return;
+      const point = mapPoint(event.clientX, event.clientY, surface.getBoundingClientRect(), width, height);
+      if (!point) return;
+      event.preventDefault();
+      const used = new Set([...pointers.values()].map(p => p.id));
+      let id = 0; while (used.has(id)) id++;
+      pointers.set(event.pointerId, { id, ...point });
+      surface.setPointerCapture(event.pointerId);
+      cancelMove();
+      send({ type: 'touch', contacts: contacts() });
+    });
+    surface.addEventListener('pointermove', event => {
+      const p = pointers.get(event.pointerId); if (!p) return;
+      const point = mapPoint(event.clientX, event.clientY, surface.getBoundingClientRect(), width, height, true);
+      if (!point) return;
+      Object.assign(p, point);
+      if (!movePending) {
+        movePending = true;
+        const generation = moveGeneration;
+        requestAnimationFrame(() => {
+          if (generation !== moveGeneration) return;
+          movePending = false;
+          if (pointers.size) send({ type: 'touch', contacts: contacts() }, 'move');
+        });
+      }
+    });
+    function up(event) {
+      const p = pointers.get(event.pointerId); if (!p) return;
+      cancelMove();
+      pointers.delete(event.pointerId);
+      send({ type: 'touch', contacts: [...contacts(), { ...p, down: false }] });
     }
-  });
-  function up(event) {
-    const p = pointers.get(event.pointerId); if (!p) return;
-    cancelMove();
-    pointers.delete(event.pointerId);
-    send({ type: 'touch', contacts: [...contacts(), { ...p, down: false }] });
-  }
-  surface.addEventListener('pointerup', up);
-  const cancel = event => { if (pointers.has(event.pointerId)) release(); };
-  surface.addEventListener('pointercancel', cancel);
-  surface.addEventListener('lostpointercapture', cancel);
+    surface.addEventListener('pointerup', up);
+    const cancel = event => { if (pointers.has(event.pointerId)) release(); };
+    surface.addEventListener('pointercancel', cancel);
+    surface.addEventListener('lostpointercapture', cancel);
   }
   for (const surface of [...screens, canvas, touchSurface]) bindSurface(surface);
   window.addEventListener('blur', release);

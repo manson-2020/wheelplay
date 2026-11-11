@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPresentationController, createJpegPresenter, decodeVideoPacket } from '../common/src/main/assets/web/app.js';
+import { createPresentationController } from '../common/src/main/assets/web/presentation.js';
+import { decodeVideoPacket } from '../common/src/main/assets/web/media-probes.js';
+import { createJpegPresenter } from '../common/src/main/assets/web/jpeg-presenter.js';
 
 function fixture() {
   let time = 100, next = 0;

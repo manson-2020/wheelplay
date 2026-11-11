@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBrowserMediaSession } from '../common/src/main/assets/web/browser-media-session.js';
-import { createControlOutbox } from '../common/src/main/assets/web/app.js';
+import { createControlOutbox } from '../common/src/main/assets/web/control-outbox.js';
 
 function fixture(overrides = {}) {
   const handlers = new Map(), positions = [], sent = [], metadata = [];

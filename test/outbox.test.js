@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createControlOutbox } from '../common/src/main/assets/web/app.js';
+import { createControlOutbox } from '../common/src/main/assets/web/control-outbox.js';
 
 function fixture() {
   let time = 0, failures = 0, id = 0;

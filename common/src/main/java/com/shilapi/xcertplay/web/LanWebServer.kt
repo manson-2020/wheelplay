@@ -181,6 +181,16 @@ internal class LanWebServer(
                 "/index.html" -> "index.html" to "text/html; charset=utf-8"
                 "/text.js" -> "text.js" to "text/javascript; charset=utf-8"
                 "/app.js" -> "app.js" to "text/javascript; charset=utf-8"
+                "/viewport.js" -> "viewport.js" to "text/javascript; charset=utf-8"
+                "/presentation.js" -> "presentation.js" to "text/javascript; charset=utf-8"
+                "/media-probes.js" -> "media-probes.js" to "text/javascript; charset=utf-8"
+                "/jpeg-presenter.js" -> "jpeg-presenter.js" to "text/javascript; charset=utf-8"
+                "/control-outbox.js" -> "control-outbox.js" to "text/javascript; charset=utf-8"
+                "/browser-appearance.js" -> "browser-appearance.js" to "text/javascript; charset=utf-8"
+                "/video-renderer.js" -> "video-renderer.js" to "text/javascript; charset=utf-8"
+                "/rtc-receiver.js" -> "rtc-receiver.js" to "text/javascript; charset=utf-8"
+                "/codec-stream.js" -> "codec-stream.js" to "text/javascript; charset=utf-8"
+                "/phone-gauge.js" -> "phone-gauge.js" to "text/javascript; charset=utf-8"
                 "/desktop-input.js" -> "desktop-input.js" to "text/javascript; charset=utf-8"
                 "/style.css" -> "style.css" to "text/css; charset=utf-8"
                 "/browser-audio.js" -> "browser-audio.js" to "text/javascript; charset=utf-8"
@@ -714,6 +724,11 @@ internal class LanWebServer(
                         .put("webcodecs", config.webCodecs)
                         .put("recoveryGraceMs", recovery.graceMs)
                         .toString(),
+                    afterSend = {
+                        // The browser's own ?diag breadcrumbs cannot survive a feed-skip flood, so
+                        // the writer thread confirms here whether the control frame left at all.
+                        Log.i("WheelPlayWeb", "vcs-start written id=$id t=${SystemClock.elapsedRealtime()}")
+                    },
                 )
                 if (!source.attach(stream, config)) {
                     stopVcs()

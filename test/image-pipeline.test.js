@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createJpegPresenter, createControlOutbox, decodeVideoPacket, probeWebp } from '../common/src/main/assets/web/app.js';
+import { decodeVideoPacket, probeWebp } from '../common/src/main/assets/web/media-probes.js';
+import { createJpegPresenter } from '../common/src/main/assets/web/jpeg-presenter.js';
+import { createControlOutbox } from '../common/src/main/assets/web/control-outbox.js';
 
 test('WebP probe checks decoded dimensions and cleans up on success, failure and timeout', async () => {
   for (const result of ['supported', 'wrong-size', 'error', 'timeout']) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAppearanceReporter } from '../common/src/main/assets/web/app.js';
+import { createAppearanceReporter } from '../common/src/main/assets/web/browser-appearance.js';
 
 // A stand-in for the MediaQueryList a head unit exposes; `flip` is what the car does when its
 // appearance setting changes.

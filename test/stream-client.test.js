@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { resourceStrings } from '../scripts/resource-strings.mjs';
 const messages = resourceStrings('values-zh-rCN');
 
-const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'app.js']
+const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'viewport.js', 'presentation.js', 'media-probes.js', 'jpeg-presenter.js', 'control-outbox.js', 'browser-appearance.js', 'video-renderer.js', 'rtc-receiver.js', 'codec-stream.js', 'app.js']
   .map(name => readFileSync(new URL(`../common/src/main/assets/web/${name}`, import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replaceAll('export function', 'function').replaceAll('export const', 'const')).join('\n');
 function fixture({ storedCanvas = null, storedMode = null, processorAvailable = true, storedIgnoreZoom = null, storageDisabled = false, canvasAvailable = true, supportsWebp = false,
@@ -956,4 +956,20 @@ test('the paired socket publishes phone state to Media Session and clears it bef
   const count = ws.sent.length; pause(); assert.equal(ws.sent.length, count);
   ws.onmessage({ data: JSON.stringify({ ...state, revision: 2 }) });
   assert.equal(session.metadata, null);
+});
+
+test('a busy reply holds the landing page instead of cycling the auto-launch loop', async () => {
+  const f = fixture(), ws = await f.connect();
+  // Another head unit owns the stream: the reason is shown once, and no timer re-enters
+  // connecting - that loop was the flicker a second browser showed while the first stayed.
+  ws.onmessage({ data: JSON.stringify({ type: 'busy', message: '已有车机连接' }) });
+  assert.equal(f.element('status').textContent, '已有车机连接');
+  assert.equal(f.element('message').textContent, '已有车机连接');
+  f.advance(30000);
+  assert.equal(f.sockets.length, 1);
+  assert.equal(f.element('status').textContent, '已有车机连接');
+  // Once the other head unit leaves, the retry button is the way back in.
+  assert.equal(f.element('connect-form').hidden, false);
+  await f.connect();
+  assert.equal(f.sockets.length, 2);
 });

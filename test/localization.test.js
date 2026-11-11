@@ -1,10 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resourceStrings, renderBrowserTemplate } from '../scripts/resource-strings.mjs';
 import { t } from '../common/src/main/assets/web/text.js';
 
 const template = readFileSync(new URL('../common/src/main/assets/web/index.html', import.meta.url), 'utf8');
+
+test('every ES module the web page imports is whitelisted by the web server', () => {
+  // The server only serves hand-listed assets; a new module missing from that when-block makes
+  // the whole import graph fail on the head unit and the page stays dead (silent, no console).
+  const server = readFileSync(new URL('../common/src/main/java/com/shilapi/xcertplay/web/LanWebServer.kt', import.meta.url), 'utf8');
+  const dir = new URL('../common/src/main/assets/web/', import.meta.url);
+  const imported = new Set();
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith('.js') || name === 'audio-worklet.js') continue;
+    const source = readFileSync(new URL(name, dir), 'utf8');
+    for (const match of source.matchAll(/from\s*'\.\/([a-z-]+\.js)'/g)) imported.add(match[1]);
+  }
+  for (const name of ['text.js', 'desktop-input.js', 'audio-worklet.js']) imported.add(name);
+  assert.ok(imported.size > 10, `expected the real module graph, found ${[...imported].join(', ')}`);
+  for (const name of imported) {
+    assert.match(server, new RegExp(`"/${name.replace('.', '\\.')}" ->`), `LanWebServer must whitelist /${name}`);
+  }
+});
 test('all browser messages exist in each Android resource catalog', () => {
   for (const module of ['shared', 'common']) {
     const base = resourceStrings('values', module);

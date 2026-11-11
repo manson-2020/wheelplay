@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRtcReceiver, createControlOutbox, createVideoRenderer } from '../common/src/main/assets/web/app.js';
+import { createVideoRenderer } from '../common/src/main/assets/web/video-renderer.js';
+import { createRtcReceiver } from '../common/src/main/assets/web/rtc-receiver.js';
+import { createControlOutbox } from '../common/src/main/assets/web/control-outbox.js';
 
 function fixture(createPeer, supportsCodec = () => true, rendererFactory = null, experiment = '') {
   const sent = [], measurements = [], timers = new Map();

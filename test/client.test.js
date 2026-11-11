@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapPoint, pairingCodeFromUrl, unzoomedDisplayRect, browserViewportSize, createMediaSessionProbe } from '../common/src/main/assets/web/app.js';
+import { mapPoint, pairingCodeFromUrl, unzoomedDisplayRect, browserViewportSize } from '../common/src/main/assets/web/viewport.js';
+import { createMediaSessionProbe } from '../common/src/main/assets/web/browser-appearance.js';
 
 test('landscape pillarbox is excluded and video center maps correctly', () => {
   const rect = { left: 10, top: 80, width: 1600, height: 600 };
