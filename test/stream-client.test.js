@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { resourceStrings } from '../scripts/resource-strings.mjs';
 const messages = resourceStrings('values-zh-rCN');
 
-const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'app.js']
+const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'app.js']
   .map(name => readFileSync(new URL(`../common/src/main/assets/web/${name}`, import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replaceAll('export function', 'function').replaceAll('export const', 'const')).join('\n');
 function fixture({ storedCanvas = null, storedMode = null, processorAvailable = true, storedIgnoreZoom = null, storageDisabled = false, canvasAvailable = true, supportsWebp = false,

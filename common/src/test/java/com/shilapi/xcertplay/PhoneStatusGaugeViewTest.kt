@@ -196,4 +196,20 @@ class PhoneStatusGaugeViewTest {
         assertTrue("lit bars must be ink, found $litMark", litMark > 200)
         assertTrue("dead bars must stay grey, found $deadMark", deadMark in 90..190)
     }
+
+    @Test
+    fun aWiredLinkDrawsTheUsbMarkNotCellularBars() {
+        val bitmap = render(88, 64, network = "eth", bars = 4)
+        val unit = radius / PhoneGaugeGeometry.RING_RADIUS
+        // The mark's centre dot sits in the middle, like every other mark.
+        val mark = brightest(bitmap, center.toFloat(), center.toFloat(), 8)
+        assertTrue("the wired mark must be drawn in the centre, found $mark", mark > 200)
+        // The leftmost cellular bar's slot stays empty: the bars must not stand in for the mark.
+        val barSlot = brightest(bitmap, center + (34.4f - 50f) * unit, center + (60f - 50f) * unit, 1)
+        assertTrue("no cellular bar may appear beside the mark, found $barSlot", barSlot < 100)
+        // Zero strength greys the whole mark instead of losing it, like the browser's slots.
+        val dead = render(88, 64, network = "eth", bars = 0)
+        val deadMark = brightest(dead, center.toFloat(), center.toFloat(), 8)
+        assertTrue("a dead mark must stay grey, found $deadMark", deadMark in 90..190)
+    }
 }

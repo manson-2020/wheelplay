@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { phoneStatusBadge, phoneGaugeValues } from '../common/src/main/assets/web/app.js';
+import { phoneStatusBadge, phoneGaugeValues } from '../common/src/main/assets/web/phone-gauge.js';
 
 const ink = '#dfe4e8', track = '#8b95a1', low = '#ff453a', charging = '#30d158';
 
@@ -166,6 +166,24 @@ test('cellular lights its bars from the left', () => {
   assert.equal(markNetwork(markup), '5g');
   assert.deepEqual(markSlots(markup).map(slot => slot.color), [ink, ink, track, track]);
   assert.doesNotMatch(markup, /<path d="M43\.2/);
+});
+
+test('a wired link draws the USB tethering mark, not cellular bars', () => {
+  const markup = gauge({ network: 'eth', bars: 4, battery: 63, volume: 64 });
+  assert.equal(markNetwork(markup), 'eth');
+  // Two chevrons frame three dots, and the whole mark lights as one piece at the first bar.
+  assert.deepEqual(
+    markSlots(markup),
+    [ink, ink, ink, ink, ink].map((color, index) => ({ at: 1, ink: index < 2 ? 'stroke' : 'fill', color })),
+  );
+  // Neither the Wi-Fi fan nor the cellular bars may stand in for the wired mark.
+  assert.doesNotMatch(markup, /<path d="M43\.2/);
+  assert.doesNotMatch(markup, /x="31\.25"/);
+  // A wired-only ride can have the server report no metered strength at all: the mark stays lit.
+  const unknown = gauge({ network: 'eth', bars: 99, battery: 63, volume: 64 });
+  assert.deepEqual(markSlots(unknown).every(slot => slot.color === ink), true);
+  const dead = gauge({ network: 'eth', bars: 0, battery: 63, volume: 64 });
+  assert.deepEqual(markSlots(dead).every(slot => slot.color === track), true);
 });
 
 test('the transport stays in the icon: every network keeps the bottom opening for the volume', () => {

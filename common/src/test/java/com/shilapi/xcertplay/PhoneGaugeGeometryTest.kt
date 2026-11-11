@@ -10,7 +10,7 @@ import org.junit.Test
 /**
  * The on-phone gauge and the browser gauge are two renderers over one reading, so these numbers are
  * the contract between them: they must stay identical to `ringDash` and `phoneStatusMarkup` in
- * common/src/main/assets/web/app.js.
+ * common/src/main/assets/web/phone-gauge.js.
  */
 class PhoneGaugeGeometryTest {
     @Test

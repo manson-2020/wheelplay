@@ -29,7 +29,7 @@ import moe.feng.wheelplay.*
  * The same circular gauge the browser floats over the head-unit picture, drawn with Canvas for the
  * on-phone preview: that screen is a [android.view.TextureView] fed straight from the decoder, so the
  * HTML badge has nothing to attach to. Values, geometry and colours mirror `phoneGaugeValues` and
- * `phoneStatusMarkup` in common/src/main/assets/web/app.js - keep the two in step when the design moves.
+ * `phoneStatusMarkup` in common/src/main/assets/web/phone-gauge.js - keep the two in step when the design moves.
  *
  * It is a small view rather than part of the picture, so a drag moves only this view and every touch
  * outside it still reaches CarPlay.
@@ -356,32 +356,68 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         canvas.save()
         canvas.translate(0f, MARK_SHIFT * unit)
         canvas.scale(MARK_SCALE, MARK_SCALE, cx, cy)
-        if (snapshot.network == "wifi") {
-            markPaint.style = Paint.Style.STROKE
-            markPaint.strokeWidth = WIFI_STROKE * unit
-            markPaint.strokeCap = Paint.Cap.ROUND
-            val fanCenter = cy + (WIFI_CENTER_Y - 50f) * unit
-            for (index in WIFI_RADII.indices) {
-                markPaint.color = if (snapshot.bars > index) INK else TRACK
-                val fanRadius = WIFI_RADII[index] * unit
-                box.set(cx - fanRadius, fanCenter - fanRadius, cx + fanRadius, fanCenter + fanRadius)
-                canvas.drawArc(box, WIFI_START_DEGREES, WIFI_SWEEP_DEGREES, false, markPaint)
-            }
-            markPaint.style = Paint.Style.FILL
-            markPaint.color = if (snapshot.bars >= 1) INK else TRACK
-            canvas.drawCircle(cx, fanCenter, WIFI_DOT_RADIUS * unit, markPaint)
-        } else {
-            markPaint.style = Paint.Style.FILL
-            val bottom = cy + (CELL_BASELINE_Y - 50f) * unit
-            for (index in CELL_HEIGHTS.indices) {
-                markPaint.color = if (snapshot.bars > index) INK else TRACK
-                val barHeight = CELL_HEIGHTS[index] * unit
-                val barLeft = cx + (CELL_LEFT_X + index * CELL_STEP_X - 50f) * unit
-                box.set(barLeft, bottom - barHeight, barLeft + CELL_WIDTH * unit, bottom)
-                canvas.drawRoundRect(box, CELL_CORNER * unit, CELL_CORNER * unit, markPaint)
-            }
+        when (snapshot.network) {
+            "wifi" -> drawWifiFan(canvas, snapshot, cx, cy, unit)
+            // The wired mark copies the platform's USB tethering glyph - two chevrons framing three
+            // dots - and lights as one piece, exactly like the browser's `eth` slots.
+            "eth" -> drawUsbMark(canvas, snapshot, cx, cy, unit)
+            else -> drawCellularBars(canvas, snapshot, cx, cy, unit)
         }
         canvas.restore()
+    }
+
+    private fun drawWifiFan(canvas: Canvas, snapshot: PhoneStatus.Snapshot, cx: Float, cy: Float, unit: Float) {
+        markPaint.style = Paint.Style.STROKE
+        markPaint.strokeWidth = WIFI_STROKE * unit
+        markPaint.strokeCap = Paint.Cap.ROUND
+        val fanCenter = cy + (WIFI_CENTER_Y - 50f) * unit
+        for (index in WIFI_RADII.indices) {
+            markPaint.color = if (snapshot.bars > index) INK else TRACK
+            val fanRadius = WIFI_RADII[index] * unit
+            box.set(cx - fanRadius, fanCenter - fanRadius, cx + fanRadius, fanCenter + fanRadius)
+            canvas.drawArc(box, WIFI_START_DEGREES, WIFI_SWEEP_DEGREES, false, markPaint)
+        }
+        markPaint.style = Paint.Style.FILL
+        markPaint.color = if (snapshot.bars >= 1) INK else TRACK
+        canvas.drawCircle(cx, fanCenter, WIFI_DOT_RADIUS * unit, markPaint)
+    }
+
+    private fun drawUsbMark(canvas: Canvas, snapshot: PhoneStatus.Snapshot, cx: Float, cy: Float, unit: Float) {
+        val lit = snapshot.bars >= 1
+        markPaint.style = Paint.Style.STROKE
+        markPaint.strokeWidth = WIFI_STROKE * unit
+        markPaint.strokeCap = Paint.Cap.ROUND
+        markPaint.color = if (lit) INK else TRACK
+        val chevron = android.graphics.Path()
+        for (part in CHEVRONS) {
+            chevron.reset()
+            chevron.moveTo(cx + (part[0] - 50f) * unit, cy + (part[1] - 50f) * unit)
+            chevron.lineTo(cx + (part[2] - 50f) * unit, cy + (part[3] - 50f) * unit)
+            chevron.lineTo(cx + (part[4] - 50f) * unit, cy + (part[5] - 50f) * unit)
+            canvas.drawPath(chevron, markPaint)
+        }
+        markPaint.style = Paint.Style.FILL
+        for (dot in USB_DOTS) {
+            markPaint.color = if (lit) INK else TRACK
+            canvas.drawCircle(
+                cx + (dot[0] - 50f) * unit,
+                cy + (dot[1] - 50f) * unit,
+                USB_DOT_RADIUS * unit,
+                markPaint,
+            )
+        }
+    }
+
+    private fun drawCellularBars(canvas: Canvas, snapshot: PhoneStatus.Snapshot, cx: Float, cy: Float, unit: Float) {
+        markPaint.style = Paint.Style.FILL
+        val bottom = cy + (CELL_BASELINE_Y - 50f) * unit
+        for (index in CELL_HEIGHTS.indices) {
+            markPaint.color = if (snapshot.bars > index) INK else TRACK
+            val barHeight = CELL_HEIGHTS[index] * unit
+            val barLeft = cx + (CELL_LEFT_X + index * CELL_STEP_X - 50f) * unit
+            box.set(barLeft, bottom - barHeight, barLeft + CELL_WIDTH * unit, bottom)
+            canvas.drawRoundRect(box, CELL_CORNER * unit, CELL_CORNER * unit, markPaint)
+        }
     }
 
     private companion object {
@@ -403,6 +439,21 @@ class PhoneStatusGaugeView @JvmOverloads constructor(
         const val CELL_BASELINE_Y = 64f
         const val CELL_CORNER = 2.8f
         val CELL_HEIGHTS = floatArrayOf(8f, 16f, 24f, 32f)
+
+        // The wired mark: two chevrons framing three dots, the platform's USB tethering glyph - each
+        // chevron is one polyline in the 0..100 design space, and the dots sit on the centre line.
+        // Tall as the Wi-Fi fan, so the three marks read as the same size on the disc. Everything
+        // shares the first bar: a wired link lights the whole mark, a dead one greys it.
+        val CHEVRONS = listOf(
+            floatArrayOf(37f, 39.5f, 30.5f, 50f, 37f, 60.5f),
+            floatArrayOf(63f, 39.5f, 69.5f, 50f, 63f, 60.5f),
+        )
+        val USB_DOTS = listOf(
+            floatArrayOf(42.5f, 50f),
+            floatArrayOf(50f, 50f),
+            floatArrayOf(57.5f, 50f),
+        )
+        const val USB_DOT_RADIUS = 3f
 
         const val SWEEP_MILLIS = 700L
         const val POLL_MILLIS = 1_000L

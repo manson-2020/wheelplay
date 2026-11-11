@@ -92,13 +92,26 @@ internal object PhoneStatus {
     }
 
     /**
-     * The transport carrying the phone's internet. A VPN tunnel - the tethering and Tesla helpers both
-     * can install one - hides the radio underneath it, so the badge reports the physical uplink instead
-     * of the virtual interface the head unit is not connected through.
+     * The transport carrying the stream to this head unit. A VPN tunnel - the tethering and Tesla
+     * helpers both can install one - hides the radio underneath it, so the badge reports the physical
+     * uplink instead of the virtual interface the head unit is not connected through; a USB tethering
+     * link to the head unit is that physical path itself and wins outright.
      */
     private fun uplink(context: Context): Pair<String, Int> {
         val manager = runCatching { context.getSystemService(ConnectivityManager::class.java) }.getOrNull()
             ?: return "none" to 0
+        // The USB tethering link to the head unit registers as an ethernet network, and one without
+        // an internet capability whenever it is the downstream side: the cable then carries the
+        // stream while the radios underneath may carry nothing at all - a wired-only ride has them
+        // switched off on purpose. The cable is the path the picture actually takes, so it outranks
+        // every radio, and it must never read as "no network".
+        val wired = runCatching {
+            manager.allNetworks.any { network ->
+                runCatching { manager.getNetworkCapabilities(network) }.getOrNull()
+                    ?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true
+            }
+        }.getOrDefault(false)
+        if (wired) return "eth" to BARS_UNKNOWN
         val active = runCatching { manager.activeNetwork }.getOrNull()
         val capabilities = active?.let { runCatching { manager.getNetworkCapabilities(it) }.getOrNull() }
         if (capabilities != null && !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
