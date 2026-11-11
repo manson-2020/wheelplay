@@ -9,6 +9,7 @@ import com.shilapi.xcertplay.web.RememberedBrowsers
 import com.shilapi.xcertplay.web.WebListenSettings
 import moe.feng.wheelplay.CarPlayResolutionSlot
 import moe.feng.wheelplay.CarPlaySafeMargins
+import moe.feng.wheelplay.RememberedCarPlayScreen
 
 internal enum class SettingsCategory(
     @param:StringRes val title: Int,
@@ -113,8 +114,11 @@ internal data class SettingsState(
     val certificateType: WebListenSettings.CertificateType =
         WebListenSettings.CertificateType.DEFAULT,
     val customCertificate: Boolean = false,
+    val bundledCertificate: Boolean = false,
     val tesla: TeslaHttpConfig = TeslaHttpConfig(),
     val browsers: List<RememberedBrowsers.Device> = emptyList(),
+    val headUnitScreens: List<RememberedCarPlayScreen> = emptyList(),
+    val headUnitDefaultKey: String = "",
     val runtime: SettingsRuntime = SettingsRuntime(),
 ) {
     fun selected(setting: ChoiceSetting) = choices.getValue(setting)
@@ -150,4 +154,6 @@ internal class SettingsActions(
     val command: (SettingsCommand) -> Unit,
     val renameBrowser: (String, String) -> Unit,
     val removeBrowser: (String?) -> Unit,
+    val selectScreen: (String) -> Unit,
+    val removeScreen: (String) -> Unit,
 )

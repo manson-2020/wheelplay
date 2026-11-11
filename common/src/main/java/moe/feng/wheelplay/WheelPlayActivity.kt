@@ -582,7 +582,9 @@ class WheelPlayActivity : AppCompatActivity() {
             resetBranding = { includeName -> changeSettings { settingsModel.resetBranding(includeName) }?.let(::toast) },
             command = { command -> changeSettings { settingsCommand(command) }?.let(::toast) },
             renameBrowser = { id, name -> changeSettings { settingsModel.renameBrowser(id, name) }?.let(::toast) },
-            removeBrowser = { id -> changeSettings { settingsModel.removeBrowser(id) }?.let(::toast) }
+            removeBrowser = { id -> changeSettings { settingsModel.removeBrowser(id) }?.let(::toast) },
+            selectScreen = { key -> changeSettings { settingsModel.selectScreen(key) }?.let(::toast) },
+            removeScreen = { key -> changeSettings { settingsModel.removeScreen(key) }?.let(::toast) }
         )
     }
 

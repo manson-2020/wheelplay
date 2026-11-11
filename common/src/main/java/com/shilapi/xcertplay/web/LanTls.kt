@@ -19,6 +19,7 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Date
+import java.util.zip.ZipInputStream
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLServerSocketFactory
@@ -85,6 +86,44 @@ internal object LanTls {
 
     fun hasCustom(context: Context) = customFile(context).baseFile.exists()
 
+    const val BUNDLED_CERT_ASSET = "https_cert.zip"
+
+    /**
+     * PEM files provisioned at build time as [.local/https_cert.zip] (fullchain.pem +
+     * privkey.pem). Absent builds simply return null and keep the self-signed default.
+     */
+    fun hasBundled(context: Context) = runCatching {
+        context.assets.open(BUNDLED_CERT_ASSET).use { true }
+    }.getOrDefault(false)
+
+    /** Extracts (certificate chain, private key) PEM bytes from a provisioned zip asset. */
+    fun parseBundled(zipBytes: ByteArray): Pair<ByteArray, ByteArray>? {
+        var chain: ByteArray? = null
+        var key: ByteArray? = null
+        ZipInputStream(zipBytes.inputStream()).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                if (!entry.isDirectory) {
+                    val name = entry.name.substringAfterLast('/').lowercase()
+                    val bytes = zip.readBytes()
+                    when {
+                        "priv" in name || name.endsWith(".key") -> if (key == null) key = bytes
+                        "chain" in name || "cert" in name || name.endsWith(".pem") ->
+                            if (chain == null) chain = bytes
+                    }
+                }
+                zip.closeEntry()
+            }
+        }
+        val certificates = chain ?: return null
+        val privateKey = key ?: return null
+        return certificates to privateKey
+    }
+
+    private fun bundledPem(context: Context): Pair<ByteArray, ByteArray>? = runCatching {
+        context.assets.open(BUNDLED_CERT_ASSET).use { parseBundled(it.readBytes()) }
+    }.getOrNull()
+
     @Synchronized
     fun create(context: Context, addresses: List<String>, hostname: String = ""): Endpoint {
         val file = customFile(context)
@@ -93,6 +132,12 @@ internal object LanTls {
             file.openRead().use { store.load(it, CharArray(0)) }
             return endpoint(store, "server", true)
         }
+        // A provisioned build ships its own trusted identity; fall back to the self-signed CA if
+        // the files are unusable so the HTTPS listener always starts.
+        val bundled = bundledPem(context)?.let {
+            runCatching { preparePem(it.first, it.second) }.getOrNull()
+        }
+        if (bundled != null) return bundled.endpoint
         return createDefault(context, addresses, hostname)
     }
 

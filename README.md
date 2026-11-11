@@ -23,7 +23,7 @@ One projection source and one browser control session can be active at a time. F
 ## Features
 
 - **Display and touch:** WebRTC H.264 / supported HEVC passthrough, JPEG / WebP compatibility streaming, fullscreen, and adjustable resolution, frame rate, and image quality. Native video is the default renderer; two experimental Canvas modes are also available.
-- **Pairing:** Scan the browser's QR code or enter a pairing code. Remembered browsers can restore pairing; view, rename, or revoke them in settings.
+- **Head-unit browser:** Opening the page connects automatically, with no QR scan or pairing code. The first visit is remembered; view, rename, or revoke browsers in settings. Display options live behind the floating circular status disc and slide in from the right.
 - **CarPlay audio and controls:** Android audio and microphone by default, optional browser routing, and Media Session metadata and playback controls where the browser and phone app support them.
 - **CarPlay preferences:** Day/night mode, safe margins, custom return-to-car name and icon, browser-disconnection behavior, and optional Android or browser GPS. The iPhone's own location is used by default.
 - **Connection options:** Configurable HTTP / HTTPS listeners, certificate import, and opt-in Tesla compatibility through experimental no-root VPN or root hotspot routing.
@@ -45,19 +45,20 @@ Missing CarPlay resources do not prevent the Web service, browser pairing, or di
 
 For **VNC**, open **Input sources → VNC** and enter the IP address, port, and optional temporary password of an existing VNC server. Use a trusted LAN or VPN: VNC traffic is unencrypted and TLS/VeNCrypt is not supported. See the [VNC guide](docs/VNC.md) for setup and limitations.
 
-### 3. Pair the car browser
+### 3. Connect the car browser
 
 1. Start WheelPlay and connect the Android host and car to a network where they can reach each other.
-2. Open the **local address shown in the app** in the car browser. The product website is only for downloads and documentation.
-3. Scan the browser's QR code with WheelPlay and approve pairing, or enter the pairing code in the browser. Select browser options and start the display.
-4. For CarPlay, keep WheelPlay in the foreground during setup, connect the iPhone by USB or wirelessly, and complete Android permissions and the iPhone's CarPlay prompt. You can also start the connection from the paired browser's waiting screen.
-5. Once connected, use the car touchscreen to control the projected interface.
+2. Open the **local address shown in the app** in the car browser. The product website is only for downloads and documentation. The page obtains credentials and connects on its own - no QR scan, pairing code, or "Start display" click.
+3. For CarPlay, keep WheelPlay in the foreground during setup, connect the iPhone by USB or wirelessly, and complete Android permissions and the iPhone's CarPlay prompt. You can also start the connection from the browser's waiting screen.
+4. Once connected, use the car touchscreen to control the projected interface.
 
-Later visits can restore pairing, but still require starting the display. Clearing browser storage, changing the address, or switching HTTP / HTTPS requires pairing again. Remove remembered devices under **Settings → Browser devices → Connected devices**.
+Display options are no longer on the page: tap the floating, draggable **circular status disc** (battery / network / volume), or the top-bar Settings button, to slide the panel in from the right. Options such as hiding the top bar, fullscreen, video renderer, browser zoom, location and HTTPS are read from stored defaults before the connection starts.
 
-The page also accepts query parameters that change nothing when absent: `?code=123456` pairs with that code, `?auto=1` launches straight away in a remembered browser using the current options (remembered renderer, top bar hidden by default) while an unpaired browser still waits for pairing, and `?diag=1` / `?unhide=1` show WebRTC and still-image diagnostics or keep the pre-first-frame video in the layout. Combine them with `&`, for example `?auto=1&diag=1`. `?ms=1` lets the page own the head-unit media session: it registers `navigator.mediaSession` and forwards play, pause and skip actions to the phone, which sends them to the iPhone; the `?diag=1` panel shows `ms=… key=… last=<action> media=<action>→<result>` (measured: some head units only deliver play/pause, because skip keys are AVRCP commands sent only while Bluetooth audio is connected); `?ms=2` additionally plays browser audio through a media element, because Chrome only routes platform media keys to the page owning a playing media element. A page load carries no user gesture, so a fullscreen request from `?auto=1` is rejected and only the top bar is hidden.
+Later visits restore the remembered browser and connect immediately. Clearing browser storage, changing the address, or switching HTTP / HTTPS re-establishes trust automatically. Remove remembered devices under **Settings → Browser devices → Connected devices**.
 
-Manage remembered browsers under Settings → 浏览器设备 (Browser devices) → 连接过的设备 (Connected devices). View names, pairing times, last connection times and addresses; rename or remove one browser, or remove all. Removal immediately disconnects the device and revokes its existing sessions. Browser disconnection and server restarts retain device memory. Up to 32 browsers can be saved; remove an old entry if the limit is reached.
+The page connects automatically by default. Query parameters: `?code=123456` connects with that code; `?auto=1` is now equivalent to the default (kept for compatibility); `?manual=1` restores the QR/code launch page for troubleshooting; `?diag=1` / `?unhide=1` show WebRTC and still-image diagnostics or keep the pre-first-frame video in the layout. Combine them with `&`, for example `?auto=1&diag=1`. `?ms=1` lets the page own the head-unit media session: it registers `navigator.mediaSession` and forwards play, pause and skip actions to the phone, which sends them to the iPhone; the `?diag=1` panel shows `ms=… key=… last=<action> media=<action>→<result>` (measured: some head units only deliver play/pause, because skip keys are AVRCP commands sent only while Bluetooth audio is connected); `?ms=2` additionally plays browser audio through a media element, because Chrome only routes platform media keys to the page owning a playing media element. A page load carries no user gesture, so the automatic fullscreen request is rejected and only the top bar is hidden; one more tap inside the page enables fullscreen and audio / microphone permission.
+
+Manage remembered browsers under Settings → 浏览器设备 (Browser devices) → 连接过的设备 (Connected devices). View names, pairing times, last connection times and addresses; rename or remove one browser, or remove all. Removal immediately disconnects the device and revokes its existing sessions; the next visit re-establishes trust automatically. Browser disconnection and server restarts retain device memory. Up to 32 browsers can be saved; remove an old entry if the limit is reached.
 
 ## Compatibility notes
 
@@ -65,6 +66,7 @@ Manage remembered browsers under Settings → 浏览器设备 (Browser devices) 
 - Actual frame rate and stability depend on the phone, host, browser, network, and Android background restrictions. WebRTC uses local UDP without external STUN/TURN and falls back to image streaming when necessary. Canvas rendering does not guarantee higher frame rates or bypass car browser restrictions.
 - Browsers that block private IP addresses may need [Tesla compatibility mode](docs/TESLA_HTTP.md). Its availability does not establish compatibility with every car or Android device.
 - Use a trusted local network. HTTP traffic is unencrypted; optional HTTPS requires a trusted certificate. Do not expose the service to the public internet. Complete setup and compatibility testing while parked.
+- First-visit automatic trust means any browser on that network that can open the address can view the picture and send touch input back to the phone. Use an isolated hotspot or trusted LAN, and revoke unfamiliar devices under **Settings → Browser devices → Connected devices**. `/stream` still requires a token and the same-origin check.
 
 ## Build
 
@@ -90,6 +92,8 @@ Output: `mobile/build/outputs/apk/debug/mobile-debug.apk` (application ID `top.w
 
 For a private provisioned build, place `offline-mfi/identity.pk8` and `offline-mfi/certificate.p7b` beneath `.local/auth-assets/` or the directory selected by `WHEELPLAY_AUTH_ASSETS_DIR`, then run `./gradlew :mobile:assembleProvisionedDebug` to verify the packaged files. Keep these resources out of Git and public APKs.
 
+You can also bundle an HTTPS certificate: put an `https_cert.zip` containing `fullchain.pem` and `privkey.pem` under `.local/`, and the build packages it as an APK asset. When present, HTTPS under **Network & access** uses the bundled certificate by default (a custom upload still overrides it); without the file the default local certificate applies. Do not commit or distribute this archive either.
+
 Run the Android checks used by CI:
 
 ```sh
@@ -106,7 +110,7 @@ npm run check
 npm run demo
 ```
 
-The demo runs at `http://localhost:8081` with pairing code `123456` and synthetic video. It is a development fixture; the actual phone connection and LAN server run in the Android app.
+The demo runs at `http://localhost:8081` and connects on open (`?manual=1` still accepts pairing code `123456`), with synthetic video. It is a development fixture; the actual phone connection and LAN server run in the Android app.
 
 ### Product website
 

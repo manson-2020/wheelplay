@@ -25,6 +25,10 @@ internal object BrowserStrings {
             "web_ignore_browser_zoom_help" to UiR.string.web_ignore_browser_zoom_help,
             "web_browser_paired" to UiR.string.web_browser_paired,
             "web_start_display" to UiR.string.web_start_display,
+            "web_reconnect" to UiR.string.web_reconnect,
+            "web_display_settings" to UiR.string.web_display_settings,
+            "web_settings_close" to UiR.string.web_settings_close,
+            "ui_settings" to UiR.string.ui_settings,
             "web_paired_ready_to_start" to UiR.string.web_paired_ready_to_start,
             "web_pair_start_display" to UiR.string.web_pair_start_display,
             "web_paired_choose_the_options_above_then_tap_start_display" to
@@ -129,6 +133,8 @@ internal object BrowserStrings {
                 UiR.string.web_hide_top_bar_enter_full_screen_on_start,
             "web_enter_full_screen_when_starting_and_hide_the_top" to
                 UiR.string.web_enter_full_screen_when_starting_and_hide_the_top,
+            "web_enter_debug_mode" to UiR.string.web_enter_debug_mode,
+            "web_exit_debug_mode" to UiR.string.web_exit_debug_mode,
             "web_display_video_with_canvas_experimental" to
                 UiR.string.web_display_video_with_canvas_experimental,
             "web_decode_video_offscreen_then_draw_it_on_a_canvas" to

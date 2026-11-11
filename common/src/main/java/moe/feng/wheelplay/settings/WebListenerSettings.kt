@@ -92,8 +92,11 @@ internal fun WebListenerSettings(state: SettingsState, actions: SettingsActions)
                 }
         }
         SettingsDescription(
-            if (state.customCertificate) R.string.settings_certificate_custom
-            else R.string.settings_certificate_default
+            when {
+                state.customCertificate -> R.string.settings_certificate_custom
+                state.bundledCertificate -> R.string.settings_certificate_builtin
+                else -> R.string.settings_certificate_default
+            }
         )
         SettingsDescription(R.string.settings_certificate_description)
     }

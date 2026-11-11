@@ -830,12 +830,15 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     /**
-     * The canvas to negotiate when no head-unit browser viewport is in play: the size recorded when
-     * the default view was chosen (the phone's own canvas on-phone, or the measured browser viewport
-     * for the browser), falling back to the native browser default until that option is first saved.
-     * Reading it here and in the preview keeps both on the same number, so opening the on-phone
-     * display never reconnects. A watching browser keeps the recorded dp canvas; the physical-pixel
-     * twin is only applied while the picture is meant for the phone.
+     * The canvas to negotiate when no head-unit browser viewport is in play.
+     *
+     * A fresh install starts from the 1184 x 920 preset; every connection after that starts from
+     * the remembered head-unit screen (or the one pinned in settings), so a known car does not need
+     * a startup renegotiation. When the head unit reports its own size the session is rebuilt at
+     * that size and [startCarPlay] records it for the next launch.
+     *
+     * The on-phone display is the exception: it must keep its own dp/physical-pixel canvas, since
+     * a head-unit resolution would stretch the local preview and force an extra reconnect.
      */
     private fun defaultDisplaySize(): DisplaySize {
         val recorded = AirPlayPersistence.loadDefaultDisplaySize(this)
@@ -844,13 +847,18 @@ class CarPlayHostActivity : ComponentActivity() {
                 CarPlayPhoneDisplay.landscapePx(dpWidth, dpHeight, resources.displayMetrics.density)
                     ?.takeIf { AirPlayPersistence.loadDefaultView(this) == CarPlayDefaultView.PHONE_DISPLAY }
             }
-        val size = CarPlayPhoneDisplay.selectDefaultDisplayPair(
+        val phoneCanvas = CarPlayPhoneDisplay.selectDefaultDisplayPair(
             recorded,
             pxTwin,
             WebSession.hasViewer,
             WebSession.localDisplayActive,
         )
-        return size?.let { DisplaySize(it.first, it.second) } ?: DisplaySize(1280, 720)
+        val phoneOwnsCanvas = WebSession.localDisplayActive ||
+            AirPlayPersistence.loadDefaultView(this) == CarPlayDefaultView.PHONE_DISPLAY
+        if (phoneOwnsCanvas && phoneCanvas != null)
+            return DisplaySize(phoneCanvas.first, phoneCanvas.second)
+        val remembered = CarPlayScreenMemory.default(this)
+        return DisplaySize(remembered.width, remembered.height)
     }
 
     private fun createMediaSink(
@@ -1059,6 +1067,15 @@ class CarPlayHostActivity : ComponentActivity() {
             return
         }
         val controllerGeneration = restartGeneration
+        // Only a session that really reaches the handshake counts as "connected". The first one is
+        // the preset; a head unit that reports its own size rebuilds the session and replaces it.
+        // While the picture is shown on this phone the canvas is the phone screen, not a car screen,
+        // so it must never enter (or overwrite) the head-unit history.
+        val shownOnPhone = WebSession.localDisplayActive ||
+            AirPlayPersistence.loadDefaultView(this) == CarPlayDefaultView.PHONE_DISPLAY
+        if (!shownOnPhone) {
+            CarPlayScreenMemory.record(this, size.width, size.height, widthPhysicalMm)
+        }
         // The settings page can change branding while this activity remains in the back stack.
         simulatedManufacturerName = AirPlayPersistence.loadSimulatedManufacturerName(this)
         val config = createRuntimeConfig()

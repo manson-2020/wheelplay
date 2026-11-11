@@ -47,6 +47,17 @@ internal class SettingsViewModel(
         )
     val state = mutableState.asStateFlow()
 
+    /** The screen history changes behind this screen whenever a CarPlay session negotiates. */
+    private val screenMemoryListener = { reload() }
+
+    init {
+        CarPlayScreenMemory.addChangeListener(screenMemoryListener)
+    }
+
+    override fun onCleared() {
+        CarPlayScreenMemory.removeChangeListener(screenMemoryListener)
+    }
+
     fun open(category: SettingsCategory?) {
         savedState["settingsCategory"] = category?.name
         mutableState.value = mutableState.value.copy(category = category)
@@ -151,8 +162,11 @@ internal class SettingsViewModel(
             mdnsHostname = WebListenSettings.mdnsHostname(app),
             certificateType = WebListenSettings.certificateType(app),
             customCertificate = LanTls.hasCustom(app),
+            bundledCertificate = LanTls.hasBundled(app),
             tesla = TeslaHttpCompatibility.config(app),
             browsers = WebSession.rememberedBrowsers(app).list(),
+            headUnitScreens = CarPlayScreenMemory.list(app),
+            headUnitDefaultKey = CarPlayScreenMemory.defaultKey(app),
         )
     }
 
@@ -452,6 +466,17 @@ internal class SettingsViewModel(
 
     fun removeBrowser(id: String?) {
         if (id == null) WebSession.forgetAllBrowsers(app) else WebSession.forgetBrowser(app, id)
+        reload()
+    }
+
+    /** Pin a remembered screen as the starting canvas of the next CarPlay launch. */
+    fun selectScreen(key: String) {
+        CarPlayScreenMemory.select(app, key)
+        reload()
+    }
+
+    fun removeScreen(key: String) {
+        CarPlayScreenMemory.remove(app, key)
         reload()
     }
 }

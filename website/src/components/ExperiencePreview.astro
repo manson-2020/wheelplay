@@ -297,17 +297,16 @@ const { t } = useTranslations(Astro.url.pathname);
                 />
                 <circle cx="12" cy="20" r=".8" /></svg
             ></span>
-            <h3>{t("第一次配对，")}<br />{t("下一次更从容。")}</h3>
-            <p>{t("用 WheelPlay 扫描车机网页二维码，")}<br />{t("或在车机输入配对码。确认后，启动显示。")}</p>
+            <h3>{t("打开网页，")}<br />{t("自动就连接。")}</h3>
+            <p>{t("在车机浏览器打开应用里显示的地址，")}<br />{t("无需扫码或配对码，画面随即出现。")}</p>
             <div
               class="pair-code"
-              aria-label={t("示例配对码，不可用于实际连接")}
+              aria-label={t("自动连接示意，不可用于实际连接")}
             >
-              <span>1</span><span>2</span><span>3</span><span>4</span
-              ><span>5</span><span>6</span>
+              <span>AUTO</span><span>CONNECT</span>
             </div>
             <span class="connection-footnote"
-              >{t("示例配对码 · 已记住的浏览器可恢复配对")}</span
+              >{t("打开即连接 · 已记住的浏览器无需再次操作")}</span
             >
           </div>
         </div>

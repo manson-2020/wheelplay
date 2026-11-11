@@ -282,6 +282,15 @@ internal class LanWebServer(
                             ?: return response(Response.Status.FORBIDDEN, "Too many sessions")
                     JSONObject().put("token", token)
                 }
+                // First visit on the local network: trust the page without a QR scan or code.
+                // The same-origin check above still applies, /stream still requires this token,
+                // and the browser is enrolled below so it can be revoked later.
+                "/pair/auto" -> {
+                    val token =
+                        pairing.issueToken()
+                            ?: return response(Response.Status.FORBIDDEN, "Too many sessions")
+                    JSONObject().put("token", token)
+                }
                 "/pair/remember" ->
                     synchronized(devices) {
                         val token = session.headers["x-pair-token"]

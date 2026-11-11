@@ -218,4 +218,6 @@ private val previewActions =
         command = {},
         renameBrowser = { _, _ -> },
         removeBrowser = {},
+        selectScreen = {},
+        removeScreen = {},
     )

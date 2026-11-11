@@ -11,6 +11,15 @@ val localAuthenticationAssets = providers.environmentVariable("WHEELPLAY_AUTH_AS
     .orNull?.let { file(it).canonicalFile }
     ?: rootProject.file(".local/auth-assets").takeIf { it.exists() }?.canonicalFile
 
+// Optional provisioned HTTPS identity (.local/https_cert.zip with fullchain.pem + privkey.pem);
+// builds without the file ship only the self-signed default certificate.
+val localHttpsCertZip = rootProject.file(".local/https_cert.zip").takeIf { it.exists() }
+val httpsCertAssets = file(layout.buildDirectory.get().asFile.resolve("generated/https-cert-assets"))
+val copyHttpsCert by tasks.registering(Copy::class) {
+    localHttpsCertZip?.let { from(it) }
+    into(httpsCertAssets)
+}
+
 android {
     namespace = "com.shilapi.xcertplay"
     compileSdk {
@@ -30,6 +39,7 @@ android {
 
 
     localAuthenticationAssets?.let { sourceSets.getByName("main").assets.srcDir(it) }
+    sourceSets.getByName("main").assets.srcDir(httpsCertAssets)
 
     signingConfigs {
         create("release") {
@@ -98,13 +108,14 @@ val rejectBundledCredentials by tasks.registering {
         listOf("identity.pk8", "certificate.p7b").map { dir.resolve("offline-mfi/$it").canonicalFile }.toSet()
     } ?: emptySet()
     inputs.files(filesToCheck)
+    dependsOn(copyHttpsCert)
     doLast {
         check(allowed.all { it.isFile }) { "Explicit local authentication assets are incomplete" }
         val unexpected = filesToCheck.files.filter { it.canonicalFile !in allowed }
         check(unexpected.isEmpty()) { "Unexpected credential files in APK assets" }
     }
 }
-tasks.named("preBuild") { dependsOn(rejectBundledCredentials) }
+tasks.named("preBuild") { dependsOn(rejectBundledCredentials, copyHttpsCert) }
 
 // Source-only builds remain useful for CI; device delivery must verify the actual ZIP.
 tasks.register("assembleProvisionedDebug") {

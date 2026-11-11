@@ -48,17 +48,21 @@ See the [authentication import guide](https://github.com/fython/wheelplay/blob/m
 
 This website provides downloads and instructions. Use the local address in the app to connect your devices.
 
-## Pair and start the display
+## Open the page and connect
 
-1. On first use, scan the QR code on the car browser page with WheelPlay and confirm pairing. You can also enter the pairing code in the browser.
-2. Choose your browser options and select “Start display.”
+1. Open the address shown in the app in the car browser. The page obtains credentials and connects on its own - no QR scan, pairing code, or "Start display" click.
+2. Display options live behind the floating, draggable **circular status disc** (battery / network / volume): tap it to slide the panel in from the right. The top-bar Settings button also works before connecting. Options such as hiding the top bar, fullscreen, video renderer, browser zoom, location and HTTPS use stored defaults before the connection starts.
 3. Start a connection in the app using the [instructions for your source](/en/docs/sources/). For CarPlay, keep the app in the foreground during setup, complete device permissions, and allow CarPlay on the iPhone.
 4. View and control the connected source in the car browser. VNC also supports a mouse and physical keyboard; view-only mode disables remote input.
-5. Only one source runs at a time. If switching sources disconnects the browser, reconnect and start the display again.
+5. Only one source runs at a time. If switching sources disconnects the browser, the page reconnects automatically.
 
-Remembered browsers can restore pairing on later visits. Clearing browser data, disabling storage, switching between HTTP and HTTPS, or changing the access address requires pairing again.
+Add `?manual=1` to restore the old QR/code launch page when troubleshooting. A page load has no user gesture, so the automatic fullscreen request is rejected (only the top bar is hidden); one more tap inside the page enables fullscreen and audio / microphone permission.
 
-Under **Settings → Browser devices → Connected devices**, you can view, rename, or remove devices. Removing a device immediately disconnects it and requires it to pair again. Only one browser control session is allowed at a time.
+Remembered browsers connect on every later visit. Clearing browser data, disabling storage, switching between HTTP and HTTPS, or changing the access address re-establishes trust automatically.
+
+Under **Settings → Browser devices → Connected devices**, you can view, rename, or remove devices. Removing a device immediately disconnects it; the next visit re-establishes trust automatically. Only one browser control session is allowed at a time.
+
+**Security note:** first-visit automatic trust means any browser on the same network that can open the address can view the picture and send touch input back to the phone. Use a trusted LAN or an isolated hotspot, and remove unfamiliar devices promptly.
 
 ## Audio and microphone
 

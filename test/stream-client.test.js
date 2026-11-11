@@ -388,8 +388,8 @@ test('interrupted display resumes with fresh authentication after a server resta
   assert.equal(f.sockets[1].url, 'ws://server:8080/stream?token=fresh-session&media=2&images=3&nowPlaying=1');
 });
 
-test('revocation during an active display stops retries and requires fresh pairing', async () => {
-  const f = fixture({ resume: () => { const error = new Error('revoked'); error.status = 401; throw error; } });
+test('manual pairing mode requires fresh pairing after revocation during an active display', async () => {
+  const f = fixture({ search: '?manual=1', resume: () => { const error = new Error('revoked'); error.status = 401; throw error; } });
   const old = await f.connect(); old.close();
   await [...f.timers.values()].find(t => t.delay === 1000).fn();
   await new Promise(resolve => setImmediate(resolve));

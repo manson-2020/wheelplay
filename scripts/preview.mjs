@@ -27,7 +27,9 @@ const server = http.createServer(async (req,res) => {
     if (req.headers.origin !== `http://${req.headers.host}`) { res.writeHead(403); res.end(); return; }
     let data;
     const token = req.headers['x-pair-token'];
-    if (req.url === '/pair/code' && req.headers['x-pair-code'] === '123456') {
+    if (req.url === '/pair/auto') {
+      const next = secret(); tokens.add(next); data = { token: next };
+    } else if (req.url === '/pair/code' && req.headers['x-pair-code'] === '123456') {
       const next = secret(); tokens.add(next); data = { token: next };
     } else if (req.url === '/pair/remember' && tokens.has(token)) {
       data = enrollments.get(token);

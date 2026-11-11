@@ -1,15 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package moe.feng.wheelplay.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
 import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.web.ImageEncodingOptions
 import com.shilapi.xcertplay.web.RtcRecoveryPolicy
 import com.shilapi.xcertplay.web.StreamTechnology
+import java.text.DateFormat
+import java.util.Date
 import moe.feng.wheelplay.*
 
 @Composable
@@ -25,6 +35,9 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
         editInitial = (state.margins ?: state.legacyMargins ?: CarPlaySafeMargins()).encode()
         editLegacy = state.margins == null && state.legacySafeArea
         editMargins = true
+    }
+    SettingsGroup(R.string.settings_group_head_unit_screen) {
+        HeadUnitScreenSettings(state, actions)
     }
     SettingsGroup(R.string.settings_group_display_layout) {
         AppearanceSettings(state, actions)
@@ -42,6 +55,129 @@ internal fun DisplaySettingsScreen(state: SettingsState, actions: SettingsAction
         ) {
             actions.margins(CarPlayResolutionSlot(editWidth, editHeight), it)
         }
+}
+
+/**
+ * The head-unit screens we have connected to, in the same shape as iOS's "CarPlay 画面 → 车机屏幕"
+ * list: resolution · ratio, simulated width and density, and the last connection time. The checked
+ * row is the canvas the next launch starts with. Tap to pin it, swipe (or use the trash button) to
+ * remove it. Before the first connection the factory preset is shown as a never-used row.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HeadUnitScreenSettings(state: SettingsState, actions: SettingsActions) {
+    val screens = state.headUnitScreens.ifEmpty { listOf(CarPlayScreenMemory.preset()) }
+    val dateFormat = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+        Column {
+            screens.forEachIndexed { index, screen ->
+                key(screen.key) {
+                    if (index > 0) {
+                        Box(
+                            Modifier.fillMaxWidth()
+                                .height(1.dp)
+                                .background(MaterialTheme.colorScheme.outlineVariant),
+                        )
+                    }
+                    val removable = !screen.neverUsed
+                    val dismissState = rememberSwipeToDismissBoxState()
+                    // A completed swipe removes the record; the reload from the action disposes
+                    // this row, so there is no half-dismissed item left behind.
+                    LaunchedEffect(dismissState.currentValue) {
+                        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
+                            actions.removeScreen(screen.key)
+                        }
+                    }
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        enableDismissFromStartToEnd = false,
+                        enableDismissFromEndToStart = removable,
+                        backgroundContent = {
+                            Box(
+                                Modifier.fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.errorContainer)
+                                    .padding(end = 20.dp),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.ic_settings_delete),
+                                    settingsString(R.string.settings_head_unit_screen_delete),
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                            }
+                        },
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceContainer)
+                                .testTag("screen:${screen.key}")
+                                .clickable(enabled = removable, role = Role.Button) {
+                                    actions.selectScreen(screen.key)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    settingsString(
+                                        R.string.settings_head_unit_screen_size,
+                                        screen.width,
+                                        screen.height,
+                                        screen.aspectRatio,
+                                    ),
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    settingsString(
+                                        R.string.settings_head_unit_screen_metrics,
+                                        screen.widthPhysicalMm,
+                                        screen.dpi,
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    if (screen.neverUsed)
+                                        settingsString(R.string.settings_head_unit_screen_preset)
+                                    else
+                                        settingsString(
+                                            R.string.settings_head_unit_screen_last_used,
+                                            dateFormat.format(Date(screen.lastUsedAt)),
+                                        ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (screen.key == state.headUnitDefaultKey) {
+                                Icon(
+                                    painterResource(R.drawable.ic_settings_check),
+                                    settingsString(R.string.settings_head_unit_screen_default),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            if (removable) {
+                                IconButton(
+                                    onClick = { actions.removeScreen(screen.key) },
+                                    modifier = Modifier.testTag("screen-delete:${screen.key}"),
+                                ) {
+                                    Icon(
+                                        painterResource(R.drawable.ic_settings_delete),
+                                        settingsString(R.string.settings_head_unit_screen_remove),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    SettingsDescription(R.string.settings_head_unit_screen_description)
 }
 
 /** What CarPlay looks like on either screen: mode, size, safe area and overlays. */

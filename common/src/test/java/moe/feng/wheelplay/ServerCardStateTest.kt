@@ -58,11 +58,14 @@ class ServerCardStateTest : ComposeSettingsTest() {
             assertNull(shadowOf(activity).nextStartedActivity)
         } finally { controller.pause().stop().destroy() }
     }
-    @Test fun pairingControlsDisappearForAuthenticatedViewerAndReturnAfterDisconnect() {
+    @Test fun headUnitBrowserCardShowsConnectionStateWithoutPairingControls() {
         val controller = Robolectric.buildActivity(WheelPlayActivity::class.java).setup()
         try {
             WebSession.start(controller.get()); refresh()
-            compose.onNodeWithTag("action:SCAN").assertExists()
+            compose.onNodeWithTag("action:SCAN").assertDoesNotExist()
+            compose.onNodeWithText(WebSession.code).assertDoesNotExist()
+            compose.onNodeWithText("等待车机浏览器连接").assertExists()
+            compose.onNodeWithText("在车机浏览器打开上方地址即自动连接，无需扫码或输入配对码。可在「设置 → 连接过的设备」中管理已连接的浏览器。").assertExists()
             Socket("127.0.0.1", 8080).use { socket ->
                 socket.soTimeout = 2000
                 socket.getOutputStream().write(("GET /stream?code=${WebSession.code} HTTP/1.1\r\n" +
@@ -72,11 +75,13 @@ class ServerCardStateTest : ComposeSettingsTest() {
                 val headers = StringBuilder()
                 while (!headers.endsWith("\r\n\r\n")) { val next = socket.getInputStream().read(); check(next >= 0); headers.append(next.toChar()) }
                 assertTrue(headers.startsWith("HTTP/1.1 101")); waitUntil { WebSession.hasViewer }; refresh()
-                compose.onNodeWithTag("action:SCAN").assertDoesNotExist(); compose.onNodeWithText(WebSession.code).assertDoesNotExist()
                 compose.onNodeWithText("车机浏览器已连接").assertExists()
+                compose.onNodeWithTag("action:SCAN").assertDoesNotExist()
+                compose.onNodeWithText(WebSession.code).assertDoesNotExist()
             }
             waitUntil { !WebSession.hasViewer }; refresh()
-            compose.onNodeWithTag("action:SCAN").assertExists(); compose.onNodeWithText(WebSession.code).assertExists()
+            compose.onNodeWithText("等待车机浏览器连接").assertExists()
+            compose.onNodeWithText(WebSession.code).assertDoesNotExist()
         } finally { controller.pause().stop().destroy() }
     }
     @Test fun selectedPhoneCanConnectAndRunningSessionsShowStopInsteadOfConnect() {

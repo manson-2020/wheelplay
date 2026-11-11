@@ -87,7 +87,11 @@ v3 可使用 WebP，最多两帧在途，并以媒体版本和帧序号精确 AC
 `LanAddresses` 结合 Android ConnectivityManager 的网络类型/当前网络及 NetworkInterface 的 IPv4 地址，保留接口来源；无法取得系统元数据时按接口名降级识别。稳定排序优先普通 Wi-Fi / 以太网，其次热点、USB、未知网络、Wi-Fi Direct、VPN、移动网络，同级优先当前网络。仅显示启用的非回环接口上的私有 IPv4 地址。主界面只展示首选项，其余默认折叠；每秒刷新地址变化时保留展开状态，避免反复重建地址列表。排序不代表对车机可达性的实际探测。
 
 
-## 扫码配对
+## 浏览器授权（自动信任与扫码配对）
+
+默认路径不再要求人工确认：首次打开网页时，前端调用同源 `POST /pair/auto`，服务签发随机浏览器令牌，随后 `/pair/remember` 把设备凭据写入浏览器 localStorage 并登记到 `RememberedBrowsers`；之后 `/pair/resume` 换新令牌并直接建立 WebSocket。`/stream` 仍强制校验令牌与同源，`TouchLease` 单 viewer、设备撤销和 32 台上限均不变，因此去掉的是「首次人工批准」而不是访问控制本身。代价是同一网络内任何能打开该地址的浏览器都能自动获得画面与触控权限，仅适用于可信局域网；README 已给出安全提示。
+
+`?manual=1` 保留下面的扫码／配对码流程用于排查问题，`?code=xxxxxx` 也仍可用：
 
 网页通过同源 `POST /pair/request` 创建两分钟有效的临时请求。服务返回请求 ID 和独立的轮询凭据；`GET /pair/qr` 使用这些凭据获取本地生成的 SVG 二维码。二维码内容是 `wheelplay-pair:v1` 格式，包含服务实例标识、请求 ID 和独立的扫码授权随机值，不包含六位配对码或可打开的网络地址。网页每秒通过同源 `POST /pair/status` 查询结果。
 

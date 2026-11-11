@@ -129,14 +129,9 @@ private fun Action(label: String, action: UiAction, dispatch: UiDispatch, argume
             state.otherAddresses.forEach { entry -> Description(entry.description); SelectionContainer { Text(entry.url) } }
         }
     }
-    CardSection(stringResource(UiR.string.ui_browser_pairing)) {
-        if (!state.viewerConnected) {
-            Description(stringResource(UiR.string.ui_scan_the_qr_code_on_the_head_unit_web))
-            Action(stringResource(UiR.string.ui_scan_qr_code_to_pair), UiAction.SCAN, dispatch, primary = true)
-            Description(stringResource(UiR.string.ui_or_enter_the_pairing_code_on_the_web_page))
-            SelectionContainer { Text(state.code, style = MaterialTheme.typography.headlineLarge) }
-        }
+    CardSection(stringResource(UiR.string.ui_head_unit_browser)) {
         Description(stringResource(if (state.viewerConnected) UiR.string.ui_head_unit_browser_connected else UiR.string.ui_waiting_for_head_unit_browser))
+        Description(stringResource(UiR.string.ui_head_unit_browser_auto_connect_hint))
     }
     CardSection(stringResource(UiR.string.home_source_title)) {
         Action(state.sourceName, UiAction.CHOOSE_HOME, dispatch)

@@ -64,6 +64,7 @@
     <string name="ui_try_in_this_device_s_browser">在本机浏览器中体验</string>
     <string name="ui_other_addresses">其他地址</string>
     <string name="ui_browser_pairing">浏览器配对</string>
+    <string name="ui_head_unit_browser_auto_connect_hint">在车机浏览器打开上方地址即自动连接，无需扫码或输入配对码。可在「设置 → 连接过的设备」中管理已连接的浏览器。</string>
     <string name="ui_scan_the_qr_code_on_the_head_unit_web">扫描车机网页上的二维码，即可授权显示与触控。</string>
     <string name="ui_scan_qr_code_to_pair">扫描二维码配对</string>
     <string name="ui_or_enter_the_pairing_code_on_the_web_page">或在网页输入配对码</string>
@@ -382,6 +383,9 @@
     <string name="ui_the_hotspot_password_must_be_8_63_characters">热点密码必须为 8–63 个字符</string>
     <string name="web_browser_paired">浏览器已配对</string>
     <string name="web_start_display">启动显示</string>
+    <string name="web_reconnect">重新连接</string>
+    <string name="web_display_settings">显示设置</string>
+    <string name="web_settings_close">关闭</string>
     <string name="web_paired_ready_to_start">已配对 · 等待启动</string>
     <string name="web_pair_start_display">配对并启动显示</string>
     <string name="web_paired_choose_the_options_above_then_tap_start_display">已配对。选择上方选项后，点击「启动显示」。</string>
@@ -443,10 +447,12 @@
     <string name="web_connect_your_carplay_display">连接 CarPlay 车机屏幕</string>
     <string name="web_for_the_first_connection_tap_scan_qr_code_to">首次连接时，在服务端 App 点击「扫描二维码配对」，</string>
     <string name="web_then_scan_the_qr_code_below_and_allow_the">扫描下方二维码并允许连接。</string>
-    <string name="web_hide_top_bar_after_connecting">连接后隐藏顶部栏</string>
+    <string name="web_hide_top_bar_after_connecting">隐藏顶部栏</string>
     <string name="web_let_carplay_fill_the_page_refresh_to_return_to">让 CarPlay 画面占满整个页面；刷新页面可返回连接界面。</string>
-    <string name="web_hide_top_bar_enter_full_screen_on_start">启动后隐藏顶栏并全屏</string>
-    <string name="web_enter_full_screen_when_starting_and_hide_the_top">点击启动时进入全屏，连接后隐藏顶栏；退出全屏可恢复顶栏。不支持全屏时仅隐藏顶栏，刷新页面可返回连接界面。</string>
+    <string name="web_hide_top_bar_enter_full_screen_on_start">全屏</string>
+    <string name="web_enter_full_screen_when_starting_and_hide_the_top">勾选后立即进入全屏；下次连接时自动申请全屏（浏览器可能要求先点一下页面）。退出全屏可恢复顶部栏。</string>
+    <string name="web_enter_debug_mode">进入调试模式</string>
+    <string name="web_exit_debug_mode">退出调试模式</string>
     <string name="web_display_video_with_canvas_experimental">使用 Canvas 显示视频（实验性）</string>
     <string name="web_decode_video_offscreen_then_draw_it_on_a_canvas">视频在屏幕外解码，再绘制到画布；适用于视频元素显示异常的浏览器。可能增加耗电，本浏览器会记住选择。</string>
     <string name="web_browser_microphone_requires_https">浏览器麦克风需要 HTTPS</string>

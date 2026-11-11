@@ -1280,7 +1280,8 @@ if (typeof document !== 'undefined') {
   const queryFlag = name => new RegExp(`(?:^|[?&])${name}=1(?:&|$)`).test(String(location.search || ''));
   const diagnosticStatus = queryFlag('diag');
   const keepVideoVisible = queryFlag('unhide');
-  const autoLaunch = queryFlag('auto');
+  // Opening the page connects automatically. `?manual=1` restores the QR/code launch page.
+  const autoLaunch = !queryFlag('manual');
   // `?rtcexp=noanswer|inactive` runs the Bluetooth-conflict probes inside the normal negotiation.
   const rtcExperiment = (String(location.search || '').match(/[?&]rtcexp=(noanswer|inactive)(?:&|$)/) || [])[1] || '';
   // `?ms=1` registers a Media Session; `?ms=2` additionally plays browser audio through a media
@@ -1321,7 +1322,11 @@ if (typeof document !== 'undefined') {
   let width = 1280, height = 720, live = false, lastStatus = 0, rtcMedia = {}, codecMedia = {};
   let heartbeat = null, movePending = false, moveGeneration = 0, outbox = null;
   let authGeneration = 0, deviceCredential = null, storageAvailable = false;
+  let userDisconnected = false, autoRetryTimer = null;
   let launchPresentation = null;
+  // Set when an automatic fullscreen request was rejected for lack of a user gesture; the next
+  // tap anywhere in the page re-requests it, mirroring the "one more tap enables fullscreen" note.
+  let immersiveRetry = false;
   const locationOption = $('browser-location');
   locationOption.checked = false; // Never inherit form restoration or grant consent through storage.
   const browserLocation = createBrowserLocation({ send: data => send(data), onState(enabled, message, key) {
@@ -1357,6 +1362,36 @@ if (typeof document !== 'undefined') {
   ignoreZoomOption.addEventListener('change', () => {
     try { window.localStorage.setItem(ignoreZoomPreference, String(ignoreZoomOption.checked)); } catch (_) {}
     release(); syncDisplayZoom(); scheduleViewportReport();
+  });
+  // Top-bar and fullscreen options persist across visits; defaults live in the HTML (top bar on,
+  // fullscreen off) and apply when storage is unavailable.
+  const hideToolbarOption = $('hide-toolbar');
+  const fullscreenOption = $('fullscreen-on-start');
+  const hideToolbarPreference = 'wheelplay.hideToolbar';
+  const fullscreenPreference = 'wheelplay.fullscreenOnStart';
+  try {
+    const storedHideToolbar = window.localStorage.getItem(hideToolbarPreference);
+    if (storedHideToolbar !== null) hideToolbarOption.checked = storedHideToolbar === 'true';
+    fullscreenOption.checked = window.localStorage.getItem(fullscreenPreference) === 'true';
+  } catch (_) {}
+  hideToolbarOption.addEventListener('change', () => {
+    try { window.localStorage.setItem(hideToolbarPreference, String(hideToolbarOption.checked)); } catch (_) {}
+    if (!$('display').hidden) {
+      $('topbar').hidden = hideToolbarOption.checked || Boolean(launchPresentation?.immersive);
+    }
+  });
+  fullscreenOption.addEventListener('change', () => {
+    try { window.localStorage.setItem(fullscreenPreference, String(fullscreenOption.checked)); } catch (_) {}
+    if (fullscreenOption.checked) {
+      // The toggle itself is a user gesture, so this request is allowed right here.
+      immersiveRetry = false;
+      if (!document.fullscreenElement && document.documentElement?.requestFullscreen) {
+        try { Promise.resolve(document.documentElement.requestFullscreen()).catch(() => {}); } catch (_) {}
+      }
+    } else {
+      immersiveRetry = false;
+      if (launchPresentation?.ownsFullscreen && document.fullscreenElement) exitLaunchFullscreen();
+    }
   });
   const presentation = createPresentationController({ onChange: renderPresentation });
   const jpeg = createJpegPresenter(screens, {
@@ -1435,25 +1470,30 @@ if (typeof document !== 'undefined') {
       if (typeof device.id === 'string' && typeof device.secret === 'string' && device.id.length === 32 && device.secret.length === 32) deviceCredential = device;
     }
   } catch (_) {}
-  function showPairingReady(name = t("web_browser_paired")) {
-    $('remembered-device').hidden = false;
+  function showPairingReady(name = t("web_browser_paired"), autoStart = true) {
+    $('remembered-device').hidden = autoLaunch;
     $('device-name').textContent = name;
     $('qr-pairing').hidden = true; $('pair-instructions').hidden = true;
     $('code-entry').hidden = true; $('code').required = false; $('code').disabled = true;
+    $('connect-form').hidden = autoLaunch && !userDisconnected;
     $('connect-label').textContent = t("web_start_display");
     $('connect').disabled = false;
     $('status').textContent = t("web_paired_ready_to_start"); $('message').textContent = '';
-    // `?auto=1` skips the launch page: a restored pairing starts with the remembered options.
-    if (autoLaunch && pairingToken) launch();
+    // A remembered or freshly trusted browser connects without a launch click.
+    if (autoStart && autoLaunch && pairingToken && !userDisconnected) launch();
   }
   function showPairingEntry() {
+    // QR/code pairing remains available under `?manual=1`; the default path never shows it.
+    const manual = !autoLaunch;
     $('remembered-device').hidden = true;
-    $('qr-pairing').hidden = false; $('pair-instructions').hidden = false;
-    $('code-entry').hidden = false; $('code').required = true; $('code').disabled = false;
-    $('connect-label').textContent = t("web_pair_start_display");
+    $('qr-pairing').hidden = !manual; $('pair-instructions').hidden = !manual;
+    $('code-entry').hidden = !manual; $('code').required = manual; $('code').disabled = !manual;
+    $('connect-form').hidden = !manual && !userDisconnected;
+    $('connect-label').textContent = t(userDisconnected ? "web_reconnect" :
+      manual ? "web_pair_start_display" : "web_start_display");
     $('connect').disabled = false;
   }
-  async function preparePairing(token, generation) {
+  async function preparePairing(token, generation, autoStart = true) {
     pairingToken = token;
     let name = t("web_browser_paired");
     let message = t("web_paired_choose_the_options_above_then_tap_start_display");
@@ -1469,12 +1509,17 @@ if (typeof document !== 'undefined') {
       }
     } else message = t("web_paired_for_this_session_this_browser_cannot_remember_the");
     if (generation !== authGeneration) return;
-    showPairingReady(name); $('device-status').textContent = message;
+    showPairingReady(name, autoStart); $('device-status').textContent = message;
   }
   async function initializePairing(linkedCode = null) {
     const generation = ++authGeneration;
+    clearTimeout(autoRetryTimer);
     stopQr(); pairingToken = null;
     showPairingEntry(); $('connect').disabled = true;
+    if (userDisconnected) {
+      $('status').textContent = t("web_disconnected");
+      return;
+    }
     if (deviceCredential) {
       $('status').textContent = t("web_restoring_pairing");
       try {
@@ -1507,6 +1552,26 @@ if (typeof document !== 'undefined') {
       } catch (_) {
         if (generation !== authGeneration) return;
         $('message').textContent = t("web_the_pairing_code_in_this_link_has_expired_scan");
+      }
+    }
+    if (autoLaunch) {
+      // First visit: the service issues a token without a QR scan or a pairing code. The origin
+      // check on the server and the token requirement on /stream still apply.
+      $('status').textContent = t("web_connecting");
+      try {
+        const result = await pairApi('auto');
+        if (generation !== authGeneration) return;
+        await preparePairing(result.token, generation);
+        return;
+      } catch (_) {
+        if (generation !== authGeneration) return;
+        $('status').textContent = t("web_waiting_to_pair");
+        $('message').textContent = t("web_could_not_pair");
+        // The service may still be starting; retry without leaving a dead launch page behind.
+        autoRetryTimer = setTimeout(() => {
+          if (generation === authGeneration) initializePairing();
+        }, 2000);
+        return;
       }
     }
     if (generation !== authGeneration) return;
@@ -1762,15 +1827,32 @@ if (typeof document !== 'undefined') {
       // Keep the request in the submit gesture, before asynchronous pairing or WebSocket setup.
       Promise.resolve(document.documentElement.requestFullscreen()).then(() => {
         if (presentation.cancelled && !launchPresentation?.immersive && document.fullscreenElement) exitLaunchFullscreen();
-      }).catch(() => { presentation.ownsFullscreen = false; });
+      }).catch(() => {
+        presentation.ownsFullscreen = false;
+        // Auto-connecting pages have no gesture: remember the wish and retry on the first tap.
+        if (!presentation.cancelled) immersiveRetry = true;
+      });
     } catch (_) { presentation.ownsFullscreen = false; }
   }
   function restoreLaunchPresentation() {
+    immersiveRetry = false;
     if (!launchPresentation) return;
     launchPresentation.cancelled = true;
     launchPresentation.immersive = false;
     if (launchPresentation.ownsFullscreen && document.fullscreenElement) exitLaunchFullscreen();
   }
+  // A rejected automatic request retries on the next user gesture anywhere in the page.
+  document.addEventListener('pointerdown', () => {
+    if (!immersiveRetry) return;
+    if (document.fullscreenElement || !$('fullscreen-on-start').checked || !document.documentElement?.requestFullscreen) {
+      immersiveRetry = false;
+      return;
+    }
+    immersiveRetry = false;
+    try {
+      Promise.resolve(document.documentElement.requestFullscreen()).catch(() => { immersiveRetry = true; });
+    } catch (_) {}
+  });
   function disconnect(refreshQr = true) {
     stopQr();
     authGeneration++;
@@ -1795,6 +1877,36 @@ if (typeof document !== 'undefined') {
   const statusBadge = $('phone-status');
   const badgePositionPreference = 'wheelplay.badgePosition';
   let phoneGaugeSvg = null;
+
+  // The disc is also the settings handle, so it stays on screen before the first phone reading.
+  // Without readings it shows a gear instead of the battery/volume gauge.
+  const settingsBadgeMarkup = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#eef2ef" d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.87a.5.5 0 0 0 .12.61l2.03 1.58c-.04.3-.06.62-.06.94s.02.64.06.94l-2.03 1.58a.5.5 0 0 0-.12.61l1.92 3.32c.12.22.39.3.6.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.25.42.5.42h3.84c.25 0 .45-.18.5-.42l.36-2.54c.59-.24 1.12-.56 1.62-.94l2.39.96c.22.08.48 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.61l-2.03-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></svg>';
+  const settingsDrawer = $('settings-drawer');
+  const settingsScrim = $('settings-scrim');
+  let settingsOpen = false, lastSettingsToggleAt = 0;
+  function setSettingsOpen(open) {
+    settingsOpen = open;
+    settingsDrawer.classList.toggle('open', open);
+    settingsScrim.classList.toggle('open', open);
+    settingsDrawer.setAttribute('aria-hidden', String(!open));
+  }
+  function toggleSettings() { setSettingsOpen(!settingsOpen); }
+  $('settings-toggle').addEventListener('click', () => setSettingsOpen(true));
+  $('settings-close').addEventListener('click', () => setSettingsOpen(false));
+  settingsScrim.addEventListener('click', () => setSettingsOpen(false));
+  // Debug-mode entry at the bottom of the drawer: toggles ?diag=1 on the current address and
+  // keeps every other query parameter intact; credentials live in localStorage and survive it.
+  const diagMode = /[?&]diag=/.test(String(location.search || ''));
+  const diagToggle = $('diag-toggle');
+  diagToggle.textContent = t(diagMode ? 'web_exit_debug_mode' : 'web_enter_debug_mode');
+  diagToggle.addEventListener('click', () => {
+    const url = new URL(location.href);
+    if (diagMode) url.searchParams.delete('diag'); else url.searchParams.set('diag', '1');
+    window.location.href = url.href;
+  });
+  document.addEventListener?.('keydown', event => {
+    if (event.key === 'Escape' && settingsOpen) setSettingsOpen(false);
+  });
 
   // `#display` can be inverse-scaled against browser zoom, so a screen-pixel drag delta has to be
   // divided back into the element's own CSS pixels before it is stored or applied.
@@ -1860,6 +1972,13 @@ if (typeof document !== 'undefined') {
         window.localStorage.setItem(badgePositionPreference, JSON.stringify(
           { x: statusBadge.offsetLeft, y: statusBadge.offsetTop }));
       } catch (_) {}
+    } else {
+      // A tap opens the settings drawer; a double tap only resets the disc position.
+      const now = Date.now();
+      if (now - lastSettingsToggleAt >= 300) {
+        lastSettingsToggleAt = now;
+        toggleSettings();
+      }
     }
     badgeDrag = null;
   }
@@ -1875,9 +1994,11 @@ if (typeof document !== 'undefined') {
   function renderPhoneStatus(phone) {
     const values = phoneGaugeValues(phone);
     if (values === null) {
-      statusBadge.hidden = true;
-      statusBadge.innerHTML = '';
-      phoneGaugeSvg = null;
+      if (phoneGaugeSvg !== null || statusBadge.innerHTML !== settingsBadgeMarkup) {
+        statusBadge.innerHTML = settingsBadgeMarkup;
+        phoneGaugeSvg = null;
+      }
+      statusBadge.hidden = false;
       return;
     }
     const first = phoneGaugeSvg === null;
@@ -2152,7 +2273,7 @@ if (typeof document !== 'undefined') {
         } else {
           const result = await pairApi('code', { code: $('code').value });
           if (generation !== authGeneration) return;
-          await preparePairing(result.token, generation);
+          await preparePairing(result.token, generation, false);
         }
         start();
       } catch (error) {
@@ -2162,14 +2283,29 @@ if (typeof document !== 'undefined') {
         if (error.status === 401 && deviceCredential) {
           pairingToken = null; deviceCredential = null;
           try { window.localStorage.removeItem(devicePreference); } catch (_) {}
+          if (autoLaunch) {
+            autoRetryTimer = setTimeout(() => {
+              if (generation === authGeneration) initializePairing();
+            }, 1000);
+            return;
+          }
           showPairingEntry(); startQr();
         }
         $('status').textContent = t("web_could_not_pair");
         $('message').textContent = t("web_check_the_service_and_network_or_scan_again_enter");
+        if (autoLaunch && !userDisconnected) {
+          autoRetryTimer = setTimeout(() => {
+            if (generation === authGeneration) initializePairing();
+          }, 2000);
+        }
       }
     })();
   }
-  $('connect-form').addEventListener('submit', event => { event.preventDefault(); launch(); });
+  $('connect-form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (userDisconnected) { userDisconnected = false; initializePairing(); return; }
+    launch();
+  });
   $('phone-connect').addEventListener('click', () => {
     if (!paired || !send({ type: 'phone-connect' })) {
       $('phone-connect-message').textContent = t("web_browser_connection_interrupted_pair_again_and_retry");
@@ -2178,7 +2314,7 @@ if (typeof document !== 'undefined') {
     $('phone-connect').disabled = true;
     $('phone-connect-message').textContent = t("web_requesting_iphone_connection");
   });
-  $('disconnect').addEventListener('click', () => disconnect());
+  $('disconnect').addEventListener('click', () => { userDisconnected = true; disconnect(); });
   $('fullscreen').addEventListener('click', async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -2255,5 +2391,6 @@ if (typeof document !== 'undefined') {
     // Keep the short-lived code out of copied URLs and browser history entries.
     window.history?.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
   }
+  renderPhoneStatus(null);
   initializePairing(linkedCode);
 }

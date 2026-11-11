@@ -918,6 +918,20 @@ class LanWebServerTest {
         } finally { WebSession.stop() }
     }
 
+    @Test fun automaticTrustIssuesATokenAndKeepsStreamAuthorization() {
+        val server = LanWebServer(org.robolectric.RuntimeEnvironment.getApplication(), "123456")
+        server.start(5000, true)
+        try {
+            assertEquals(403, pairPost("auto", origin = "http://evil.invalid").first)
+            val token = org.json.JSONObject(pairPost("auto").second).getString("token")
+            assertTrue(server.pairing.authorized(token))
+            val credential = org.json.JSONObject(pairPost("remember", mapOf("X-Pair-Token" to token)).second)
+            assertEquals(32, credential.getString("id").length)
+            // Removing the pairing UI must not make the video/control channel public.
+            handshake("").use { assertTrue(readHeaders(it).startsWith("HTTP/1.1 401")) }
+        } finally { server.stop() }
+    }
+
     @Test fun codeAuthenticationUsesTheSameThrottleAsWebSocketPairing() {
         val server = LanWebServer(org.robolectric.RuntimeEnvironment.getApplication(), "123456")
         server.start(5000, true)
