@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { resourceStrings } from '../scripts/resource-strings.mjs';
 const messages = resourceStrings('values-zh-rCN');
 
-const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'viewport.js', 'presentation.js', 'media-probes.js', 'jpeg-presenter.js', 'control-outbox.js', 'browser-appearance.js', 'video-renderer.js', 'rtc-receiver.js', 'codec-stream.js', 'app.js']
+const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'viewport.js', 'presentation.js', 'media-probes.js', 'jpeg-presenter.js', 'control-outbox.js', 'browser-appearance.js', 'video-renderer.js', 'rtc-receiver.js', 'codec-stream.js', 'url-flags.js', 'app.js']
   .map(name => readFileSync(new URL(`../common/src/main/assets/web/${name}`, import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replaceAll('export function', 'function').replaceAll('export const', 'const')).join('\n');
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -99,13 +99,6 @@ test('a remembered browser resumes and connects on every open', async () => {
   assert.equal(f.sockets.length, 1);
   assert.equal(f.element('code-entry').hidden, true);
   assert.equal(f.element('qr-pairing').hidden, true);
-});
-
-test('?auto=1 remains an alias for the default automatic connection', async () => {
-  const f = fixture({ search: '?auto=1' });
-  await settle();
-  assert.equal(f.sockets.length, 1);
-  assert.equal(f.requests[0].url, '/pair/auto');
 });
 
 test('?manual=1 keeps QR and code pairing and waits for the launch button', async () => {

@@ -16,7 +16,7 @@ const webDir = path.join(dir, '../common/src/main/assets/web');
 const files = ['app.js', 'audio-worklet.js', 'browser-appearance.js', 'browser-audio.js',
   'browser-location.js', 'browser-media-session.js', 'codec-stream.js', 'control-outbox.js',
   'desktop-input.js', 'jpeg-presenter.js', 'media-probes.js', 'phone-gauge.js', 'presentation.js',
-  'rtc-receiver.js', 'text.js', 'video-renderer.js', 'viewport.js'];
+  'rtc-receiver.js', 'text.js', 'url-flags.js', 'video-renderer.js', 'viewport.js'];
 
 const source = name => readFileSync(path.join(webDir, name), 'utf8');
 

@@ -181,6 +181,7 @@ internal class LanWebServer(
                 "/index.html" -> "index.html" to "text/html; charset=utf-8"
                 "/text.js" -> "text.js" to "text/javascript; charset=utf-8"
                 "/app.js" -> "app.js" to "text/javascript; charset=utf-8"
+                "/url-flags.js" -> "url-flags.js" to "text/javascript; charset=utf-8"
                 "/viewport.js" -> "viewport.js" to "text/javascript; charset=utf-8"
                 "/presentation.js" -> "presentation.js" to "text/javascript; charset=utf-8"
                 "/media-probes.js" -> "media-probes.js" to "text/javascript; charset=utf-8"

@@ -13,26 +13,13 @@ import { applyPhoneGauge, phoneGaugeValues, phoneStatusMarkup } from './phone-ga
 import { createBrowserAudio } from './browser-audio.js';
 import { createBrowserLocation } from './browser-location.js';
 import { createBrowserMediaSession } from './browser-media-session.js';
+import { readUrlFlags } from './url-flags.js';
 
 if (typeof document !== 'undefined') {
   const $ = id => document.getElementById(id);
-  // Plain search parsing: this file also runs in test harnesses without URLSearchParams. The
-  // pattern argument keeps each flag's own validation (`?ms=2`, `?rtcexp=noanswer|inactive`).
-  const query = (name, pattern = '[^&]+') =>
-    (String(location.search || '').match(new RegExp(`[?&]${name}=(${pattern})(?:&|$)`)) || [])[1] || '';
-  const diagnosticStatus = query('diag', '1') !== '';
-  const keepVideoVisible = query('unhide', '1') !== '';
-  // Opening the page connects automatically. `?manual=1` restores the QR/code launch page.
-  const autoLaunch = query('manual', '1') === '';
-  // `?rtcexp=noanswer|inactive` runs the Bluetooth-conflict probes inside the normal negotiation.
-  const rtcExperiment = query('rtcexp', 'noanswer|inactive');
-  // `?ms=1` registers a Media Session; `?ms=2` additionally plays browser audio through a media
-  // element, which is what Chrome requires before it routes platform media keys to the page.
-  const mediaSessionMode = query('ms', '[12]');
-  // `?audioIdle=<ms>` tunes how long the page keeps its audio output open after the last sound; 0
-  // disables the release entirely for a head unit that needs a permanently open sink.
-  const audioIdleRaw = query('audioIdle', '\\d+');
-  const audioIdleMillis = audioIdleRaw === '' ? 5000 : Math.max(0, Number(audioIdleRaw));
+  // URL flags are parsed once, before any connection state exists (url-flags.js, docs/URL_FLAGS.md).
+  const { diagnostic: diagnosticStatus, keepVideoVisible, autoLaunch, rtcExperiment,
+    mediaSessionMode, audioIdleMillis } = readUrlFlags(location?.search || '');
   // Every persistent option funnels through here: a head unit without storage keeps session-only
   // defaults instead of failing, and a `storageAvailable` probe decides whether pairing can be
   // remembered across visits.
@@ -673,12 +660,11 @@ if (typeof document !== 'undefined') {
   settingsScrim.addEventListener('click', () => setSettingsOpen(false));
   // Debug-mode entry at the bottom of the drawer: toggles ?diag=1 on the current address and
   // keeps every other query parameter intact; credentials live in localStorage and survive it.
-  const diagMode = query('diag', '[^&]*') !== '';
   const diagToggle = $('diag-toggle');
-  diagToggle.textContent = t(diagMode ? 'web_exit_debug_mode' : 'web_enter_debug_mode');
+  diagToggle.textContent = t(diagnosticStatus ? 'web_exit_debug_mode' : 'web_enter_debug_mode');
   diagToggle.addEventListener('click', () => {
     const url = new URL(location.href);
-    if (diagMode) url.searchParams.delete('diag'); else url.searchParams.set('diag', '1');
+    if (diagnosticStatus) url.searchParams.delete('diag'); else url.searchParams.set('diag', '1');
     window.location.href = url.href;
   });
   document.addEventListener?.('keydown', event => {
@@ -1034,7 +1020,7 @@ if (typeof document !== 'undefined') {
     };
     ws.onerror = () => {}; // onclose owns retry and visible error state.
   }
-  /** Start display; `?auto=1` runs the same path without a click. */
+  /** Start display; the default pairing path calls this without a click. */
   function launch() {
     launchMode = selectedMode;
     const generation = ++authGeneration;

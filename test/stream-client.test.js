@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { resourceStrings } from '../scripts/resource-strings.mjs';
 const messages = resourceStrings('values-zh-rCN');
 
-const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'viewport.js', 'presentation.js', 'media-probes.js', 'jpeg-presenter.js', 'control-outbox.js', 'browser-appearance.js', 'video-renderer.js', 'rtc-receiver.js', 'codec-stream.js', 'app.js']
+const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'viewport.js', 'presentation.js', 'media-probes.js', 'jpeg-presenter.js', 'control-outbox.js', 'browser-appearance.js', 'video-renderer.js', 'rtc-receiver.js', 'codec-stream.js', 'url-flags.js', 'app.js']
   .map(name => readFileSync(new URL(`../common/src/main/assets/web/${name}`, import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replaceAll('export function', 'function').replaceAll('export const', 'const')).join('\n');
 function fixture({ storedCanvas = null, storedMode = null, processorAvailable = true, storedIgnoreZoom = null, storageDisabled = false, canvasAvailable = true, supportsWebp = false,
@@ -1028,6 +1028,24 @@ test('?diag=1 names the WebRTC stage on the status line and ?unhide=1 keeps a la
   hiddenWs.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true, rtcDiag: 'hasPc=1' }) });
   assert.doesNotMatch(hidden.element('status').textContent, /WebRTC:/);
   assert.equal(hidden.element('diag-panel').hidden, true);
+});
+
+test('URL flags reach the media session probe and invalid values are ignored', async () => {
+  const enabled = fixture({ search: '?diag=1&ms=1' }), ws = await enabled.connect();
+  ws.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true }) });
+  assert.match(enabled.element('diag-panel').textContent, /ms=1 api=/);
+  const invalid = fixture({ search: '?diag=1&ms=3' }), other = await invalid.connect();
+  other.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true }) });
+  assert.doesNotMatch(invalid.element('diag-panel').textContent, /ms=/);
+});
+
+test('the debug panel and the drawer button agree on ?diag=0', async () => {
+  const off = fixture({ search: '?diag=0' }), ws = await off.connect();
+  ws.onmessage({ data: JSON.stringify({ type: 'status', width: 1280, height: 720, streaming: true }) });
+  assert.equal(off.element('diag-panel').hidden, true);
+  assert.equal(off.element('diag-toggle').textContent, messages.web_enter_debug_mode);
+  const on = fixture({ search: '?diag=1' });
+  assert.equal(on.element('diag-toggle').textContent, messages.web_exit_debug_mode);
 });
 
 test('browser GPS option forwards through the authenticated stream and stops on socket loss', async () => {

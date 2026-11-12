@@ -6,6 +6,7 @@
 
 - [使用与构建说明](../README.md)：安装、配对、认证资产和构建方式。
 - [架构与协议](ARCHITECTURE.md)：离屏解码、Web 服务、触摸及生命周期。
+- [浏览器 URL 参数速查表](URL_FLAGS.md)：诊断、配对、媒体会话与实验开关的完整清单、默认值及适用场景。
 - [Android Auto 协议接入与 ICCOA 依赖边界](ANDROID_AUTO.md)：USB/TCP、宿主音频、协议测试及真机验收清单。
 - [VNC 远程桌面](VNC.md)：连接方法、RFB 协议范围、通用桌面输入和设备验收。
 - [Android 虚拟桌面](ANDROID_DESKTOP.md)：Shizuku 安装授权、本机应用选择、图像/触控链路、生命周期及尚未完成的真机验收。
