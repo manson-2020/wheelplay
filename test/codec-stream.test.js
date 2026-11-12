@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCodecReceiver, CODEC_STREAM_MAGIC } from '../common/src/main/assets/web/codec-stream.js';
+import { probeHevc } from '../common/src/main/assets/web/media-probes.js';
 
 globalThis.EncodedVideoChunk = class {
   constructor(init) { Object.assign(this, init); }
@@ -44,7 +45,9 @@ function fixture({
     get ready() { return ready; }, get stopped() { return stopped; },
     async start(id = 1) {
       await receiver.receive({ type: 'vcs-start', id, codec: 'H264', profile, recoveryGraceMs: 10000 });
-      await Promise.resolve();
+      // The capability probe is a promise chain; a single microtask is not enough for the
+      // decoder to be configured (and for an unsupported codec to send its fallback).
+      await new Promise(resolve => setImmediate(resolve));
     },
     async tick(delay, at) {
       clock = at;
@@ -127,4 +130,36 @@ test('a server stop closes the decoder and ignores stale feedback', async () => 
   assert.equal(decoder.closed, true);
   f.receiver.feed(f.packet(0, 0, true));
   assert.equal(decoder.chunks, undefined, 'closed decoders must not receive chunks');
+});
+
+test('a hung HEVC capability probe resolves instead of suppressing vcs-start', async () => {
+  const timers = new Map();
+  let id = 0;
+  const result = probeHevc({
+    decoder: { isConfigSupported: () => new Promise(() => {}) },
+    schedule(fn, delay) { const key = ++id; timers.set(key, { fn, delay }); return key; },
+    cancel(key) { timers.delete(key); },
+  });
+  const [key, timer] = [...timers.entries()][0];
+  assert.equal(timer.delay, 1500);
+  timer.fn();
+  assert.equal(await result, null, 'a cold head-unit decoder must not hold the codec stream hostage');
+  assert.equal(timers.size, 0, 'the timeout cancels itself');
+});
+
+test('a settled HEVC probe cancels its timeout and keeps the accepted codec string', async () => {
+  const cancelled = [];
+  const result = probeHevc({
+    decoder: { isConfigSupported: ({ codec }) => Promise.resolve({ supported: codec.startsWith('hvc1') }) },
+    schedule() { cancelled.push('scheduled'); return 7; },
+    cancel(key) { cancelled.push(key); },
+  });
+  assert.equal(await result, 'hvc1.1.6.L93.B0');
+  assert.deepEqual(cancelled, ['scheduled', 7]);
+});
+
+test('a throwing, unsupported or missing HEVC decoder resolves to null', async () => {
+  assert.equal(await probeHevc({ decoder: { isConfigSupported: () => { throw new Error('bad codec'); } } }), null);
+  assert.equal(await probeHevc({ decoder: { isConfigSupported: () => Promise.resolve({ supported: false }) } }), null);
+  assert.equal(await probeHevc({ decoder: null }), null);
 });

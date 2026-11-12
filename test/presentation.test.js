@@ -186,3 +186,30 @@ test('V2 video headers preserve configuration identity and do not consume PCM or
   view.setUint32(0, 0x31415057, true); assert.equal(decodeVideoPacket(buffer), null);
   assert.equal(decodeVideoPacket(new Uint8Array([0xff, 0xd8, 0xff, 0]).buffer), null);
 });
+
+test('a live video first frame commits even when the start-time snapshot is a version behind', () => {
+  const f = fixture(); f.status();
+  const start = { sessionId: 7, videoEpoch: 1, revision: f.controller.current.revision };
+  // A source reconfiguration between vcs-start/rtc-offer and the decoded frame advances the
+  // version through a status or a v2 JPEG packet; the JPEG path does not close the codec stream.
+  f.status({ videoEpoch: 2 });
+  assert.equal(f.controller.current.revision, start.revision + 1);
+  assert.equal(f.controller.present(start, 1280, 720, 'codec', start.revision), false,
+    'the version-checked path must still reject an expired snapshot');
+  assert.equal(f.controller.presentLive('codec', 1280, 720), true);
+  assert.equal(f.controller.current.frame.transport, 'codec');
+  assert.equal(f.controller.current.frame.revision, f.controller.current.revision);
+  assert.equal(f.controller.current.visible, true);
+  assert.equal(f.controller.current.interactive, true);
+});
+
+test('a live commit cannot resurrect a stopped or disconnected source', () => {
+  const f = fixture(); f.status();
+  assert.equal(f.controller.presentLive('codec', 1280, 720), true);
+  f.status({ sourceState: 'stopped' });
+  assert.equal(f.controller.presentLive('codec', 640, 360), false);
+  assert.equal(f.controller.current.frame.width, 1280);
+  f.controller.close();
+  assert.equal(f.controller.presentLive('codec', 640, 360), false);
+  assert.equal(f.controller.presentLive('codec', 0, 0), false);
+});

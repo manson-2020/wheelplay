@@ -10,7 +10,8 @@ const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-loca
     .replace(/^import .*;$/gm, '').replaceAll('export function', 'function').replaceAll('export const', 'const')).join('\n');
 function fixture({ storedCanvas = null, storedMode = null, processorAvailable = true, storedIgnoreZoom = null, storageDisabled = false, canvasAvailable = true, supportsWebp = false,
   geometry = null, visual = null, peerAvailable = true, search = '', mediaSession = null, locationBrowser = null,
-  fullscreen = 'supported', codeDenied = false, resume = () => ({ token: 'session-token', name: 'Chrome' }) } = {}) {
+  fullscreen = 'supported', codeDenied = false, videoDecoder = false,
+  resume = () => ({ token: 'session-token', name: 'Chrome' }) } = {}) {
   const elements = new Map(), timers = new Map(), raf = new Map(), sockets = [], peers = [], draws = [];
   const preferences = new Map(storedCanvas === null ? [] : [['wheelplay.canvasVideo', storedCanvas]]);
   if (storedIgnoreZoom !== null) preferences.set('wheelplay.ignoreBrowserZoom', storedIgnoreZoom);
@@ -58,6 +59,18 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
     async setLocalDescription() {}
     close() { this.closed = true; }
   }
+  // A head unit with WebCodecs: decoding a chunk synchronously delivers its first frame, which
+  // is enough to exercise the codec stream's onReady -> presentation commit path.
+  const videoDecoders = [];
+  class FakeVideoDecoder {
+    constructor({ output }) { this.output = output; videoDecoders.push(this); }
+    configure(config) { this.config = config; this.state = 'configured'; }
+    reset() { this.state = 'configured'; }
+    decode(chunk) { (this.chunks ??= []).push(chunk); this.output({ displayWidth: 1280, displayHeight: 720, close() {} }); }
+    close() { this.closed = true; }
+    static isConfigSupported() { return Promise.resolve({ supported: true }); }
+  }
+  class FakeEncodedVideoChunk { constructor(init) { Object.assign(this, init); } }
   const document = { createElement(tag) { assert.equal(tag, 'video'); const video = element('video'); createdVideos.push(video); return video; }, getElementById: element, fullscreenElement: null, documentElement: {},
     addEventListener(name, fn) { documentEvents[name] = fn; },
     exitFullscreen() {
@@ -93,6 +106,8 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
       }
     } : undefined,
     ArrayBuffer, DataView, Blob,
+    VideoDecoder: videoDecoder ? FakeVideoDecoder : undefined,
+    EncodedVideoChunk: videoDecoder ? FakeEncodedVideoChunk : undefined,
     RTCPeerConnection: peerAvailable ? Peer : undefined, performance: { now: () => clockNow },
     setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, { fn, delay, at: clockNow + delay }); return id; },
     clearTimeout(id) { timers.delete(id); }, setInterval() { return 0; }, clearInterval() {},
@@ -149,6 +164,46 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
     retry() {
       const [id, timer] = [...timers].find(([, t]) => t.delay === 10);
       timers.delete(id); timer.fn();
+    },
+    status(ws, extra = {}) {
+      ws.onmessage({ data: JSON.stringify({ type: 'status', sessionId: 7, videoEpoch: 1,
+        width: 1280, height: 720, sourceState: 'ready', inputReady: true,
+        rtcAvailable: false, vcsAvailable: false, ...extra }) });
+    },
+    async vcsStart(ws, extra = {}) {
+      ws.onmessage({ data: JSON.stringify({ type: 'vcs-start', id: 2, sessionId: 7, videoEpoch: 1,
+        codec: 'H264', profile: '640033', recoveryGraceMs: 10000, ...extra }) });
+      await new Promise(resolve => setImmediate(resolve));
+    },
+    // A v2 still-image packet with a newer epoch advances the presentation revision without
+    // stopping the codec stream - exactly what a source reconfiguration does on a first visit.
+    v2Frame(ws, epoch = 2) {
+      const buffer = new ArrayBuffer(37), view = new DataView(buffer);
+      view.setUint32(0, 0x32565057, true);
+      view.setFloat64(4, 7, true); view.setFloat64(12, epoch, true); view.setFloat64(20, 1, true);
+      view.setUint32(28, 1280, true); view.setUint32(32, 720, true);
+      ws.onmessage({ data: buffer });
+    },
+    codecFrame(ws) {
+      const buffer = new ArrayBuffer(27), view = new DataView(buffer);
+      view.setUint32(0, 0x31564357, true);
+      view.setBigInt64(4, 0n, true); view.setBigInt64(12, 1000n, true);
+      view.setUint16(20, 1, true); view.setUint16(22, 0, true);
+      ws.onmessage({ data: buffer });
+    },
+    videoDecoders,
+    recoveryCount: () => context.__frameCommitRecovery || 0,
+    // Fire the watchdog without advancing the clock: the harness's 2 s auto-pair retry would
+    // otherwise bump authGeneration and make the real reconnect callback a no-op.
+    fireWatchdog() {
+      const entry = [...timers].find(([, t]) => t.delay === 2500);
+      assert.ok(entry, 'expected the frame-commit watchdog');
+      timers.delete(entry[0]); entry[1].fn();
+    },
+    async reconnect() {
+      const entry = [...timers].filter(([, t]) => t.delay === 1000).at(-1);
+      assert.ok(entry, 'expected the reconnect timer');
+      timers.delete(entry[0]); await entry[1].fn();
     },
   };
 }
@@ -972,4 +1027,66 @@ test('a busy reply holds the landing page instead of cycling the auto-launch loo
   assert.equal(f.element('connect-form').hidden, false);
   await f.connect();
   assert.equal(f.sockets.length, 2);
+});
+
+test('a codec first frame survives a version change between vcs-start and decoding', async () => {
+  const f = fixture({ videoDecoder: true }), ws = await f.connect();
+  f.status(ws);
+  await f.vcsStart(ws);
+  assert.equal(f.videoDecoders.length, 1);
+  // A source reconfiguration advances the version without stopping the codec stream. Committing
+  // with the stale start-time revision used to discard this frame: the screen kept the last
+  // JPEG, the JPEG encoder had already stopped, and touch stayed disabled until a page refresh.
+  f.v2Frame(ws, 2);
+  f.codecFrame(ws);
+  // The next 400 ms heartbeat carries the new version's input readiness; touch is only enabled
+  // once the service says the HID channel is live, never inferred from the picture itself.
+  f.status(ws, { videoEpoch: 2, inputReady: true });
+  assert.equal(f.stats().presentation.activeMode, 'codec');
+  assert.equal(f.element('waiting').hidden, true);
+  assert.equal(f.element('touch-surface').classList.contains('stale'), false);
+  assert.equal(f.element('video-canvas').hidden, false);
+  f.advance(3000);
+  assert.equal(f.sockets.length, 1, 'a committed frame must not trigger the recovery reconnect');
+});
+
+test('a first frame the controller refuses rebuilds the socket instead of freezing', async () => {
+  const f = fixture({ videoDecoder: true }), ws = await f.connect();
+  f.status(ws);
+  await f.vcsStart(ws);
+  f.status(ws, { sourceState: 'stopped' });
+  f.codecFrame(ws);
+  assert.equal(f.element('waiting').hidden, false, 'the refused frame leaves the waiting overlay up');
+  assert.equal(f.element('video-canvas').classList.contains('stale'), true);
+  f.fireWatchdog();
+  assert.equal(ws.readyState, 3, 'the stale session is closed');
+  assert.equal(f.recoveryCount(), 1);
+  await f.reconnect();
+  assert.equal(f.sockets.length, 2, 'the existing reconnect path opens a fresh session');
+});
+
+test('frame-commit recovery is bounded so a broken head unit cannot reconnect forever', async () => {
+  const f = fixture({ videoDecoder: true });
+  const fail = async ws => {
+    f.status(ws);
+    await f.vcsStart(ws);
+    f.status(ws, { sourceState: 'stopped' });
+    f.codecFrame(ws);
+    f.fireWatchdog();
+  };
+  const first = await f.connect();
+  await fail(first);
+  assert.equal(first.readyState, 3);
+  await f.reconnect();
+  assert.equal(f.sockets.length, 2);
+  const second = f.sockets.at(-1); second.readyState = 1; second.onopen();
+  await fail(second);
+  assert.equal(second.readyState, 3);
+  await f.reconnect();
+  assert.equal(f.sockets.length, 3);
+  const third = f.sockets.at(-1); third.readyState = 1; third.onopen();
+  await fail(third);
+  assert.equal(third.readyState, 1, 'a third refusal leaves the session alone');
+  assert.equal(f.sockets.length, 3);
+  assert.equal(f.recoveryCount(), 2);
 });

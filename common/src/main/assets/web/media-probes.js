@@ -50,19 +50,31 @@ export function probeWebp({ createImage = () => new Image(), schedule = setTimeo
 // that string, or null when HEVC is unreachable here.
 export const HEVC_CODEC_STRINGS = ['hvc1.1.6.L93.B0', 'hvc1.1.6.L123.B0', 'hev1.1.6.L93.B0'];
 export function probeHevc({ decoder = typeof VideoDecoder === 'undefined' ? null : VideoDecoder,
-  candidates = HEVC_CODEC_STRINGS } = {}) {
+  candidates = HEVC_CODEC_STRINGS, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 1500 } = {}) {
   if (!decoder || typeof decoder.isConfigSupported !== 'function') return Promise.resolve(null);
-  const attempt = index => {
-    if (index >= candidates.length) return null;
-    const codec = candidates[index];
-    let request;
-    // A malformed string throws instead of rejecting, so the fallback covers both.
-    try { request = decoder.isConfigSupported({ codec, optimizeForLatency: true }); }
-    catch (_) { return null; }
-    return Promise.resolve(request)
-      .then(result => result?.supported === true ? codec : attempt(index + 1))
-      .catch(() => attempt(index + 1));
-  };
-  return Promise.resolve(attempt(0));
+  return new Promise(resolve => {
+    let settled = false, timer = null;
+    const finish = value => {
+      if (settled) return;
+      settled = true; cancel(timer); resolve(value);
+    };
+    // Cold VideoDecoder instances on head-unit Chromium builds have been seen leaving
+    // isConfigSupported pending. `vcs-start` waits on this probe, so a hung promise would
+    // suppress the whole codec stream; a timeout means "no HEVC here" and lets the service
+    // negotiate H.264 instead. Matches probeWebp's 1500 ms bound.
+    timer = schedule(() => finish(null), timeoutMs);
+    const attempt = index => {
+      if (settled || index >= candidates.length) return finish(null);
+      const codec = candidates[index];
+      let request;
+      // A malformed string throws instead of rejecting, so the fallback covers both.
+      try { request = decoder.isConfigSupported({ codec, optimizeForLatency: true }); }
+      catch (_) { return finish(null); }
+      Promise.resolve(request)
+        .then(result => result?.supported === true ? finish(codec) : attempt(index + 1))
+        .catch(() => attempt(index + 1));
+    };
+    attempt(0);
+  });
 }
 

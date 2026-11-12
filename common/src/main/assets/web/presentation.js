@@ -17,6 +17,15 @@ export function createPresentationController({
       visible: showing || held, interactive: showing && inputReady,
       frame, sessionId, videoEpoch, revision };
   }
+  // The frame bookkeeping shared by version-checked and live video commits. A video frame has
+  // no still-image mime; keeping the field explicit lets the status line fall back to JPEG text
+  // only when no video transport owns the picture.
+  function commit(transport, width, height, mime = null) {
+    frame = { width, height, transport, revision, mime };
+    invalid = false;
+    if (videoEpoch === null) { source = 'ready'; inputReady = true; }
+    publish(); return true;
+  }
   function publish() {
     const value = snapshot();
     if (value.state === 'showing' || !connected || source === 'stopped' || !frame) clearDeadline();
@@ -62,9 +71,18 @@ export function createPresentationController({
     },
     present(meta, width, height, transport, expectedRevision = null) {
       if (!accept(meta) || source === 'stopped' || expectedRevision !== null && expectedRevision !== revision) return false;
-      frame = { width, height, transport, revision, mime: meta.mime }; invalid = false;
-      if (videoEpoch === null) { source = 'ready'; inputReady = true; }
-      publish(); return true;
+      return commit(transport, width, height, meta.mime);
+    },
+    // A video receiver gates its first frame on its own decoder generation, so a frame reaching
+    // here already belongs to the current stream. A source reconfiguration between the start
+    // message and that first frame can advance `revision` through a status or a v2 JPEG packet;
+    // the snapshot captured at start time is then stale and `present()` would silently discard a
+    // valid first frame, leaving the last JPEG frozen on screen with touch disabled. Commit
+    // against the live version instead - version isolation still belongs to the receivers, which
+    // close their decoder (and thus never call onReady) when the service stops that stream.
+    presentLive(transport, width, height) {
+      if (!connected || source === 'stopped' || !width || !height) return false;
+      return commit(transport, width, height);
     },
     accepts(meta) {
       const previous = revision, accepted = accept(meta);

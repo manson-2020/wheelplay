@@ -68,6 +68,13 @@ if (typeof document !== 'undefined') {
   Object.defineProperty(window, 'wheelplayStats', { configurable: true, get: () => JSON.parse(JSON.stringify(performanceStats)) });
   let rtc = null, rtcRequested = false, rtcFps = null;
   let codec = null, codecRequested = false, codecFps = null;
+  // A video receiver can decode its first frame while the presentation controller refuses to
+  // commit it (a version advanced between the start message and the first frame, or a brief
+  // `stopped` status). Nothing else retries that commit, so the page would sit on a frozen JPEG
+  // with touch disabled until somebody refreshes. Watch for that and rebuild the session the
+  // same way a refresh would, bounded so a genuinely broken head unit cannot loop forever.
+  const FRAME_COMMIT_GRACE_MS = 2500;
+  let frameCommitTimer = null, frameCommitRetries = 0;
   // Latest server-side WebRTC hint and capability snapshot, kept for the ?diag=1 status line.
   let serverRtcHint = '', serverVcsHint = '', serverRtcDiag = '';
   let serverMedia = null;
@@ -190,12 +197,41 @@ if (typeof document !== 'undefined') {
     return video;
   }
   // Both video transports repaint through the same path; only their snapshot slot differs.
-  function showStreamSize(kind, media, size) {
-    if (!presentation.present(media, size.width, size.height, kind, media.revision)) return;
+  // The start-time snapshot used to be passed to present() as an expected revision. A source
+  // reconfiguration between `vcs-start`/`rtc-offer` and the first decoded frame advances the
+  // controller revision (a status or a v2 JPEG packet can do it), so that snapshot is then older
+  // than the live version and the first frame is discarded: the screen keeps the last JPEG and
+  // `#touch-surface.stale` blocks all input until the driver refreshes. The receivers already
+  // gate onReady on their own generation, so commit the live decoder's frame against the live
+  // version, and repair by rebuilding the socket if the controller still refuses it.
+  function showStreamSize(kind, size) {
+    if (!presentation.presentLive(kind, size.width, size.height)) {
+      watchFrameCommit(kind); return;
+    }
+    frameCommitRetries = 0; cancelFrameCommitWatch();
     width = size.width; height = size.height; jpeg.cancelPending(); jpeg.hide(); clearHeldFrame();
   }
-  function showRtcSize(size) { showStreamSize('rtc', rtcMedia, size); }
-  function showCodecSize(size) { showStreamSize('codec', codecMedia, size); }
+  function showRtcSize(size) { showStreamSize('rtc', size); }
+  function showCodecSize(size) { showStreamSize('codec', size); }
+  function cancelFrameCommitWatch() {
+    if (frameCommitTimer !== null) { clearTimeout(frameCommitTimer); frameCommitTimer = null; }
+  }
+  function watchFrameCommit(kind) {
+    cancelFrameCommitWatch();
+    frameCommitTimer = setTimeout(() => {
+      frameCommitTimer = null;
+      const ws = socket;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (presentation.current.frame?.transport === kind) { frameCommitRetries = 0; return; }
+      if (frameCommitRetries >= 2) return;
+      frameCommitRetries++;
+      // Head units have no console: keep a breadcrumb for the ?diag=1 panel.
+      globalThis.__frameCommitRecovery = (globalThis.__frameCommitRecovery || 0) + 1;
+      // A fresh socket resets the presentation version scope, which is exactly what a manual
+      // refresh does. The existing onclose path and its bounded backoff own the reconnection.
+      ws.close();
+    }, FRAME_COMMIT_GRACE_MS);
+  }
   // A start message claims a presentation slot only when the controller accepts it; switching
   // revisions drops the still-image presenter's pending work so the new transport wins cleanly.
   // A rejected start also abandons the transport itself, exactly like the handler's early return.
@@ -531,6 +567,7 @@ if (typeof document !== 'undefined') {
       ` last=${codec?.lastReason || '-'}` +
       ` startId=${globalThis.__vcsStartId ?? '-'} skips=${globalThis.__vcsFeedSkips || 0}` +
       ` closes=${globalThis.__vcsCloses ?? '-'} rejects=${globalThis.__vcsRejects || 0}` +
+      ` rec=${globalThis.__frameCommitRecovery || 0}` +
       ` cs=${(globalThis.__vcsTrail || [globalThis.__vcsStage || '-']).join(' > ')}`;
     const detail = [serverRtcDiag, videoDetail || imageDetail, capabilityDetail, mediaSessionMode
       // The probe line is the evidence for whether the head unit delivers wheel keys at all.
@@ -620,6 +657,7 @@ if (typeof document !== 'undefined') {
   // Every teardown path - an explicit disconnect, a socket drop, a page hide - releases the same
   // resources in the same order; keeping it in one function is what keeps the paths in step.
   function teardownSession() {
+    cancelFrameCommitWatch();
     presentation.close(); cleanupRtc(); cleanupImage();
     browserMedia.close(); browserAudio.close();
     browserAppearance.close(); browserLocation.close();
