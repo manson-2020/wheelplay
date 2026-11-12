@@ -318,6 +318,9 @@ class CarPlayHostActivity : ComponentActivity() {
         WebSession.setHevcUnusableHandler { source ->
             mainHandler.post { onHevcUnusable(source) }
         }
+        WebSession.setHevcRecoveredHandler {
+            mainHandler.post { onHevcRecovered() }
+        }
         showSystemBars()
         onBackPressedDispatcher.addCallback(
             this,
@@ -577,6 +580,7 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onDestroy() {
         WebSession.setBrowserViewportListener(null)
         WebSession.setHevcUnusableHandler(null)
+        WebSession.setHevcRecoveredHandler(null)
         mainHandler.removeCallbacks(applyDisplaySize)
         sessionLog?.append("Activity destroyed")
         sessionLog?.close()
@@ -825,6 +829,37 @@ class CarPlayHostActivity : ComponentActivity() {
             codecDowngradeScheduled = false
             if (!shuttingDown.get() && !reconnectScheduled && controller != null) {
                 restartCarPlay("HEVC not decodable ($source); rebuilding with H.264")
+            }
+        }, CODEC_DOWNGRADE_DELAY_MILLIS)
+    }
+
+    private var hevcRecoveryAttempted = false
+
+    /**
+     * A page that reports a real WebCodecs HEVC codec string has proved the browser can decode it.
+     * An earlier probe timeout used to be recorded as "unsupported", which persisted this H.264-only
+     * downgrade across reinstalls; revoke that verdict once and let the next setup try HEVC again.
+     * Bounded to one attempt per process so a head unit whose Android decoder genuinely rejects
+     * HEVC cannot ping-pong between downgrade and recovery on every page load.
+     */
+    private fun onHevcRecovered() {
+        // The server already checked that a stored verdict says "H.264 only" while the page just
+        // proved it can decode HEVC, so there is work to do here; guard only the process-lifetime
+        // throttle and the host's own lifetime.
+        if (!hevcEnabled || hevcRecoveryAttempted || shuttingDown.get()) return
+        hevcRecoveryAttempted = true
+        AirPlayPersistence.saveHevcUnusable(this, false)
+        appendLog("HEVC decodable again; re-arming the codec")
+        if (codecDowngradeScheduled || reconnectScheduled || shuttingDown.get() ||
+            controller == null
+        ) {
+            return
+        }
+        codecDowngradeScheduled = true
+        mainHandler.postDelayed({
+            codecDowngradeScheduled = false
+            if (!shuttingDown.get() && !reconnectScheduled && controller != null) {
+                restartCarPlay("HEVC decodable again; rebuilding with HEVC")
             }
         }, CODEC_DOWNGRADE_DELAY_MILLIS)
     }

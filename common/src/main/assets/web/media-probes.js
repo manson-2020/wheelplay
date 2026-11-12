@@ -47,10 +47,15 @@ export function probeWebp({ createImage = () => new Image(), schedule = setTimeo
 // probe it once so `?diag=1` can report `hevc=1/0` next to the H.264-only codec stream. Three
 // strings, because a decoder may take the hvc1 sample entry but not hev1 - or only the lower level;
 // the first that answers true is the one a codec stream could later be configured with. Resolves to
-// that string, or null when HEVC is unreachable here.
+// that string, or null when HEVC is provably unreachable here.
+// A cold head-unit Chromium can leave the very first isConfigSupported pending for seconds. That is
+// NOT evidence of an unsupported codec: reporting null made the service persist "this browser
+// cannot decode HEVC" and permanently downgraded the iPhone to H.264. A timeout therefore resolves
+// to HEVC_UNKNOWN, which the service treats as "no verdict yet" (see docs/MEDIA_PRESENTATION.md).
+export const HEVC_UNKNOWN = 'unknown';
 export const HEVC_CODEC_STRINGS = ['hvc1.1.6.L93.B0', 'hvc1.1.6.L123.B0', 'hev1.1.6.L93.B0'];
 export function probeHevc({ decoder = typeof VideoDecoder === 'undefined' ? null : VideoDecoder,
-  candidates = HEVC_CODEC_STRINGS, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 1500 } = {}) {
+  candidates = HEVC_CODEC_STRINGS, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 5000 } = {}) {
   if (!decoder || typeof decoder.isConfigSupported !== 'function') return Promise.resolve(null);
   return new Promise(resolve => {
     let settled = false, timer = null;
@@ -59,10 +64,11 @@ export function probeHevc({ decoder = typeof VideoDecoder === 'undefined' ? null
       settled = true; cancel(timer); resolve(value);
     };
     // Cold VideoDecoder instances on head-unit Chromium builds have been seen leaving
-    // isConfigSupported pending. `vcs-start` waits on this probe, so a hung promise would
-    // suppress the whole codec stream; a timeout means "no HEVC here" and lets the service
-    // negotiate H.264 instead. Matches probeWebp's 1500 ms bound.
-    timer = schedule(() => finish(null), timeoutMs);
+    // isConfigSupported pending. `vcs-start` waits on this probe, so a hung promise must still
+    // settle, but "did not answer in time" is not "cannot decode": the service only downgrades
+    // HEVC on an explicit null or an empty string from the page. 5 s covers a cold GPU-process
+    // startup while keeping a genuinely broken browser from blocking the stream forever.
+    timer = schedule(() => finish(HEVC_UNKNOWN), timeoutMs);
     const attempt = index => {
       if (settled || index >= candidates.length) return finish(null);
       const codec = candidates[index];

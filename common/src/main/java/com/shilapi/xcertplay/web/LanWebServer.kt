@@ -20,6 +20,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 
+/** The page's WebCodecs HEVC probe did not settle in time; this is NOT a capability verdict. */
+private const val HEVC_UNKNOWN = "unknown"
+
 /** Same-origin HTTP assets and a single paired, backpressured video/control WebSocket. */
 internal class LanWebServer(
     private val context: Context,
@@ -671,19 +674,35 @@ internal class LanWebServer(
         private fun startVcs(browserHevc: String? = null) {
             // Same monitor discipline as startRtc: never take the WebSession lock inside rtcLock.
             val media = WebSession.mediaSnapshot()
+            // `unknown` means the page's probe timed out, not that its decoder refused HEVC. A
+            // cold head-unit browser used to be remembered as H.264-only forever and the iPhone
+            // was persistently downgraded; an undecided page must leave every stored verdict
+            // untouched and let the decoder itself decide. A legacy page (null) keeps the old
+            // conservative path, and an empty string is a real "cannot decode HEVC" answer.
+            val undecided = browserHevc == HEVC_UNKNOWN
+            // Compare BEFORE remembering the new answer: a real codec string proves the browser
+            // can decode HEVC, so either stored "H.264 only" verdict is stale and this session
+            // needs one rebuild to make the iPhone negotiate HEVC again. The host throttles that
+            // rebuild to one attempt per process, so an already healthy setup is left alone.
+            val provenHevc = !undecided && !browserHevc.isNullOrEmpty()
+            val staleDowngrade = provenHevc &&
+                (!AirPlayPersistence.loadBrowserHevc(context) || AirPlayPersistence.loadHevcUnusable(context))
             synchronized(rtcLock) {
                 reconcileVideo()
-                if (browserHevc != null) rememberBrowserHevc(browserHevc.isNotEmpty())
+                if (staleDowngrade) WebSession.reportHevcRecovered()
+                if (browserHevc != null && !undecided) rememberBrowserHevc(browserHevc.isNotEmpty())
                 if (vcs != null || !vcsRetry.available || ended.get() || !WebSession.videoActive) return
                 if (rtc != null) return // One consumer per compressed source.
                 if (!codecStreamPreferred) return
                 val source = vcsSource ?: return
                 val config = vcsConfig ?: return
                 if (media.source !== source || media.sourceState == "stopped") return
-                if (config.codec == VideoCodec.H265 && browserHevc.isNullOrEmpty()) {
+                if (config.codec == VideoCodec.H265 && !undecided && browserHevc.isNullOrEmpty()) {
                     // Nothing on the page can decode HEVC, so an HEVC codec stream would only feed a
                     // decoder that rejects it; JPEG stays the fallback until the iPhone is asked for
-                    // H.264 again (see codecStreamOnly in the host activity).
+                    // H.264 again (see codecStreamOnly in the host activity). An undecided page is
+                    // allowed to try: if its decoder really refuses HEVC, `vcs-fallback` with
+                    // `codec-unsupported` is the evidence-based downgrade below.
                     vcsHint = "vcs-hevc-unsupported"
                     vcsRetry.block()
                     // An empty string is the page's own verdict; null only means it never reported.

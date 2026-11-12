@@ -2,7 +2,7 @@ import { t } from './text.js';
 import { createDesktopInput } from './desktop-input.js';
 import { mapPoint, pairingCodeFromUrl, unzoomedDisplayRect, browserViewportSize } from './viewport.js';
 import { createPresentationController } from './presentation.js';
-import { decodeVideoPacket, probeWebp, probeHevc } from './media-probes.js';
+import { decodeVideoPacket, probeWebp, probeHevc, HEVC_UNKNOWN } from './media-probes.js';
 import { createJpegPresenter } from './jpeg-presenter.js';
 import { createControlOutbox } from './control-outbox.js';
 import { createAppearanceReporter, createMediaSessionProbe } from './browser-appearance.js';
@@ -189,14 +189,26 @@ if (typeof document !== 'undefined') {
   // `#touch-surface.stale` blocks all input until the driver refreshes. The receivers already
   // gate onReady on their own generation, so commit the live decoder's frame against the live
   // version, and repair by rebuilding the socket if the controller still refuses it.
+  let lastRtcSize = null;
   function showStreamSize(kind, size) {
+    const frame = presentation.current.frame;
+    // The receiver's first-frame callback is a one-shot. Auto-pairing can briefly open two
+    // sockets (the loser's commit is dropped by `socket !== ws`), a late JPEG can reclaim the
+    // frame, and a `stopped` status can refuse the commit. In all of those cases the decoder
+    // keeps drawing at 30 fps while the controller still says "JPEG": the page freezes until a
+    // refresh. Re-assert the live picture on every stats tick; the equality guard keeps that
+    // cheap and makes this callback idempotent.
+    if (frame?.transport === kind && frame.width === size.width && frame.height === size.height &&
+        presentation.current.visible) {
+      frameCommitRetries = 0; cancelFrameCommitWatch(); return;
+    }
     if (!presentation.presentLive(kind, size.width, size.height)) {
       watchFrameCommit(kind); return;
     }
     frameCommitRetries = 0; cancelFrameCommitWatch();
     width = size.width; height = size.height; jpeg.cancelPending(); jpeg.hide(); clearHeldFrame();
   }
-  function showRtcSize(size) { showStreamSize('rtc', size); }
+  function showRtcSize(size) { lastRtcSize = size; showStreamSize('rtc', size); }
   function showCodecSize(size) { showStreamSize('codec', size); }
   function cancelFrameCommitWatch() {
     if (frameCommitTimer !== null) { clearTimeout(frameCommitTimer); frameCommitTimer = null; }
@@ -545,7 +557,8 @@ if (typeof document !== 'undefined') {
     // capability and the server's refusal reason side by side instead of guessing. `hevc` answers a
     // separate question - whether this browser could decode the phone's HEVC at all - so `?` until
     // the probe settles, then 1 with the sample entry it accepted, or 0.
-    const hevcState = hevcCodec === undefined ? '?' : hevcCodec ? `1:${hevcCodec.slice(0, 4)}` : 0;
+    const hevcState = hevcCodec === undefined || hevcCodec === HEVC_UNKNOWN ? '?'
+      : hevcCodec ? `1:${hevcCodec.slice(0, 4)}` : 0;
     const capabilityDetail = `cap secure=${window.isSecureContext ? 1 : 0} vd=${typeof VideoDecoder === 'function' ? 1 : 0}` +
       ` hevc=${hevcState}` +
       (serverVcsHint ? ` vcs=${serverVcsHint}` : '') +
@@ -553,6 +566,7 @@ if (typeof document !== 'undefined') {
       ` startId=${globalThis.__vcsStartId ?? '-'} skips=${globalThis.__vcsFeedSkips || 0}` +
       ` closes=${globalThis.__vcsCloses ?? '-'} rejects=${globalThis.__vcsRejects || 0}` +
       ` rec=${globalThis.__frameCommitRecovery || 0}` +
+      ` frame=${value.frame?.transport || '-'}:${value.frame?.width || 0}x${value.frame?.height || 0}/${value.state}` +
       ` cs=${(globalThis.__vcsTrail || [globalThis.__vcsStage || '-']).join(' > ')}`;
     const detail = [serverRtcDiag, videoDetail || imageDetail, capabilityDetail, mediaSessionMode
       // The probe line is the evidence for whether the head unit delivers wheel keys at all.
@@ -825,6 +839,9 @@ if (typeof document !== 'undefined') {
           const outputFps = mode === 'track-canvas' ? metrics.renderedFps : fps;
           rtcFps = outputFps === null ? null : Math.round(outputFps); performanceStats.receiver = metrics;
           rendererStats.renderedFps = metrics.renderedFps; rendererStats.renderedFrames = metrics.renderedFrames;
+          // Same re-assertion as the codec path below: a dropped first-frame commit must not
+          // outlive a receiver that is still decoding.
+          if (rtc.active && lastRtcSize) showRtcSize(lastRtcSize);
           presentation.refresh();
         },
       });
@@ -853,6 +870,10 @@ if (typeof document !== 'undefined') {
         onStats: (fps, metrics) => {
           codecFps = fps === null ? null : Math.round(fps); performanceStats.receiver = metrics;
           rendererStats.renderedFps = fps; rendererStats.renderedFrames = metrics.decoded;
+          // The one-shot onReady can be lost (a second auto-pair socket, a late JPEG, a refused
+          // commit). The stats tick proves the decoder is still drawing, so re-assert the live
+          // frame here instead of waiting for a manual refresh.
+          if (codec.active && metrics.size) showCodecSize(metrics.size);
           presentation.refresh();
         },
       });
@@ -949,7 +970,12 @@ if (typeof document !== 'undefined') {
             // Report what this browser can decode with the request: it is the only side that knows,
             // and the service has to decide before it sends the first access unit. The probe has
             // usually settled already; waiting costs nothing when it has not.
-            hevcProbe.then(() => { if (codecRequested) send({ type: 'vcs-start', hevc: hevcCodec || '' }); });
+            // Only a probe that actually answered "unsupported" (null) may downgrade HEVC. A
+            // timeout is `unknown`: the service then leaves its remembered capability alone and
+            // lets the decoder itself decide, instead of persisting a false H.264-only verdict.
+            hevcProbe.then(() => {
+              if (codecRequested) send({ type: 'vcs-start', hevc: hevcCodec === HEVC_UNKNOWN ? HEVC_UNKNOWN : hevcCodec || '' });
+            });
           }
           if (!data.vcsAvailable) codecRequested = false;
           if (data.rtcAvailable && !rtcRequested && !rtc.active && typeof RTCPeerConnection !== 'undefined' &&

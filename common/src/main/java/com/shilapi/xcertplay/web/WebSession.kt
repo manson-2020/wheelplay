@@ -310,6 +310,21 @@ internal object WebSession {
         hevcUnusableHandler?.invoke(source)
     }
 
+    /**
+     * A page reported a real WebCodecs HEVC codec string, so the browser can decode it. A previous
+     * downgrade may have come from a probe that merely timed out; let the host revoke its stored
+     * verdict once (it owns the codec negotiation with the iPhone).
+     */
+    @Volatile private var hevcRecoveredHandler: (() -> Unit)? = null
+
+    fun setHevcRecoveredHandler(handler: (() -> Unit)?) {
+        hevcRecoveredHandler = handler
+    }
+
+    fun reportHevcRecovered() {
+        hevcRecoveredHandler?.invoke()
+    }
+
     private var browserDevices: RememberedBrowsers? = null
     private var browserDevicesContext: Context? = null
 

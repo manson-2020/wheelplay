@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCodecReceiver, CODEC_STREAM_MAGIC } from '../common/src/main/assets/web/codec-stream.js';
-import { probeHevc } from '../common/src/main/assets/web/media-probes.js';
+import { probeHevc, HEVC_UNKNOWN } from '../common/src/main/assets/web/media-probes.js';
 
 globalThis.EncodedVideoChunk = class {
   constructor(init) { Object.assign(this, init); }
@@ -11,7 +11,7 @@ function fixture({
   supported = async () => true,
   profile = '42e01f',
 } = {}) {
-  const sent = [], drawn = [], timers = new Map();
+  const sent = [], drawn = [], timers = new Map(), reported = [];
   const decoders = [];
   let sequence = 0, clock = 0, ready = 0, stopped = 0, closed = false;
   class FakeDecoder {
@@ -24,7 +24,7 @@ function fixture({
   globalThis.VideoDecoder = FakeDecoder;
   const receiver = createCodecReceiver(frame => drawn.push(frame), {
     send: m => sent.push(m), supportsCodec: supported,
-    onReady: () => ready++, onStop: () => stopped++,
+    onReady: () => ready++, onStop: () => stopped++, onStats: (fps, metrics) => reported.push(metrics),
     schedule(fn, delay) { const id = ++sequence; timers.set(id, { fn, delay }); return id; },
     cancel(id) { timers.delete(id); },
     now: () => clock,
@@ -41,7 +41,7 @@ function fixture({
     return buffer;
   };
   return {
-    receiver, sent, drawn, decoders, timers, packet, profile,
+    receiver, sent, drawn, decoders, timers, packet, profile, reported,
     get ready() { return ready; }, get stopped() { return stopped; },
     async start(id = 1) {
       await receiver.receive({ type: 'vcs-start', id, codec: 'H264', profile, recoveryGraceMs: 10000 });
@@ -82,6 +82,9 @@ test('keyframes then deltas decode, draw and report readiness', async () => {
   await f.tick(1000, 1000);
   // The decoded counter resets at readiness, so the first feedback counts post-ready frames only.
   assert.deepEqual(f.sent.find(m => m.type === 'vcs-feedback'), { type: 'vcs-feedback', id: 3, decoded: 1 });
+  // The stats tick carries the decoded dimensions so the page can re-assert a first-frame
+  // commit that was dropped; a one-shot onReady is the only other source of that size.
+  assert.deepEqual(f.reported.at(-1).size, { width: 640, height: 360 });
 });
 
 test('deltas before the first keyframe are skipped and a gap waits for a keyframe', async () => {
@@ -132,7 +135,7 @@ test('a server stop closes the decoder and ignores stale feedback', async () => 
   assert.equal(decoder.chunks, undefined, 'closed decoders must not receive chunks');
 });
 
-test('a hung HEVC capability probe resolves instead of suppressing vcs-start', async () => {
+test('a hung HEVC capability probe resolves as unknown, not as unsupported', async () => {
   const timers = new Map();
   let id = 0;
   const result = probeHevc({
@@ -141,9 +144,11 @@ test('a hung HEVC capability probe resolves instead of suppressing vcs-start', a
     cancel(key) { timers.delete(key); },
   });
   const [key, timer] = [...timers.entries()][0];
-  assert.equal(timer.delay, 1500);
+  assert.equal(timer.delay, 5000, 'a cold GPU process gets longer than 1.5 s to answer');
   timer.fn();
-  assert.equal(await result, null, 'a cold head-unit decoder must not hold the codec stream hostage');
+  // Resolving null here used to send `vcs-start hevc:""`, which persisted "H.264 only" on the
+  // phone and downgraded the iPhone's HEVC stream until the user toggled the setting by hand.
+  assert.equal(await result, HEVC_UNKNOWN, 'a timeout is not a capability verdict');
   assert.equal(timers.size, 0, 'the timeout cancels itself');
 });
 

@@ -15,7 +15,7 @@ export function createCodecReceiver(drawFrame, {
   schedule = setTimeout, cancel = clearTimeout, now = () => Date.now(),
 } = {}) {
   let decoder = null, id = null, generation = 0, ready = false, codec = 'H264', keySeen = false;
-  let config = null, lastSequence = null;
+  let config = null, lastSequence = null, lastSize = null;
   let timeout = null, statsTimer = null, recoveryGraceMs = 10000;
   let decoded = 0, sent = 0, lastDecoded = 0, sentAtLastProgress = 0, lastSentAt = 0, stalledSince = null, fpsPrevious = null;
   let lastReason = null;
@@ -59,7 +59,7 @@ export function createCodecReceiver(drawFrame, {
       ? [...new Set([message.webcodecs, ...HEVC_CODEC_STRINGS].filter(Boolean))]
       : [`avc1.${message.profile}`];
     config = null;
-    keySeen = false; lastSequence = null; fpsPrevious = null;
+    keySeen = false; lastSequence = null; fpsPrevious = null; lastSize = null;
     timeout = schedule(() => { if (generation === token) fallback('first-frame-timeout'); }, Math.max(10000, recoveryGraceMs));
     const displayed = size => {
       if (!current() || ready || !size.width || !size.height) return;
@@ -77,7 +77,9 @@ export function createCodecReceiver(drawFrame, {
       } else if (stalledSince === null) stalledSince = at;
       const fps = fpsPrevious ? Math.max(0, decoded - fpsPrevious.count) * 1000 / Math.max(1, at - fpsPrevious.at) : null;
       fpsPrevious = { at, count: decoded };
-      onStats(fps, { decodedFps: fps, decoded });
+      // `size` lets the page re-assert a first-frame commit that was dropped: the one-shot
+      // onReady is the only other place that carries the decoded dimensions.
+      onStats(fps, { decodedFps: fps, decoded, size: lastSize });
       send({ type: 'vcs-feedback', id, decoded });
       lastDecoded = decoded;
       // Static CarPlay screens legitimately stop producing frames; server progress freezes with
@@ -104,6 +106,7 @@ export function createCodecReceiver(drawFrame, {
             decoded++;
             if (decoded === 1) probe('first-output', `${frame.displayWidth}x${frame.displayHeight}`);
             const size = { width: frame.displayWidth, height: frame.displayHeight };
+            lastSize = size;
             try { drawFrame(frame); } finally { frame.close(); }
             displayed(size);
           },

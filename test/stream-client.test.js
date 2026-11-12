@@ -1142,6 +1142,26 @@ test('a first frame the controller refuses rebuilds the socket instead of freezi
   assert.equal(f.sockets.length, 2, 'the existing reconnect path opens a fresh session');
 });
 
+test('a first-frame commit lost after decoding is re-asserted by the stats tick', async () => {
+  const f = fixture({ videoDecoder: true }), ws = await f.connect();
+  f.status(ws);
+  await f.vcsStart(ws);
+  f.codecFrame(ws);
+  assert.equal(f.stats().presentation.activeMode, 'codec');
+  // A late still image (or a second auto-pair socket whose one-shot onReady was dropped by
+  // `socket !== ws`) leaves the controller on JPEG while the decoder keeps drawing at 30 fps.
+  // This is the frozen-picture symptom: `first-output` in the trail, `img enc 0 fps`, rec=0.
+  f.v2Frame(ws, 1);
+  f.frame(ws);
+  assert.equal(f.stats().presentation.activeMode, 'jpeg', 'the still image reclaimed the frame');
+  f.advance(1000);
+  assert.equal(f.stats().presentation.activeMode, 'codec', 'the next stats tick restores the live frame');
+  assert.equal(f.element('waiting').hidden, true);
+  assert.equal(f.element('video-canvas').hidden, false);
+  assert.equal(f.sockets.length, 1, 'no reconnect or manual refresh is needed');
+  assert.equal(f.recoveryCount(), 0);
+});
+
 test('frame-commit recovery is bounded so a broken head unit cannot reconnect forever', async () => {
   const f = fixture({ videoDecoder: true });
   const fail = async ws => {
