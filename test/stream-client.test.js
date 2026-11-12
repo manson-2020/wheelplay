@@ -10,14 +10,16 @@ const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-loca
     .replace(/^import .*;$/gm, '').replaceAll('export function', 'function').replaceAll('export const', 'const')).join('\n');
 function fixture({ storedCanvas = null, storedMode = null, processorAvailable = true, storedIgnoreZoom = null, storageDisabled = false, canvasAvailable = true, supportsWebp = false,
   geometry = null, visual = null, peerAvailable = true, search = '', mediaSession = null, locationBrowser = null,
-  fullscreen = 'supported', codeDenied = false, videoDecoder = false,
+  fullscreen = 'supported', fullscreenResults = null, autoFullscreen = false, codeDenied = false, videoDecoder = false,
   resume = () => ({ token: 'session-token', name: 'Chrome' }) } = {}) {
   const elements = new Map(), timers = new Map(), raf = new Map(), sockets = [], peers = [], draws = [];
   const preferences = new Map(storedCanvas === null ? [] : [['wheelplay.canvasVideo', storedCanvas]]);
   if (storedIgnoreZoom !== null) preferences.set('wheelplay.ignoreBrowserZoom', storedIgnoreZoom);
+  if (autoFullscreen) preferences.set('wheelplay.fullscreenOnStart', 'true');
   const videoCallbacks = new Map(), createdVideos = [], processors = [];
   if (storedMode !== null) preferences.set('wheelplay.videoRenderer', storedMode);
-  const documentEvents = {}, fullscreenCalls = [];
+  const documentEvents = {}, documentListeners = {}, fullscreenCalls = [];
+  const fireDocument = (name, event = {}) => (documentListeners[name] || []).forEach(fn => fn(event));
   const visualEvents = {};
   const visualViewport = visual ? { ...visual, addEventListener(type, fn) { visualEvents[type] = fn; } } : undefined;
   const mainRect = geometry ? { left: 0, top: geometry.top, width: geometry.width, height: geometry.height - geometry.top }
@@ -25,7 +27,7 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
   let nextTimer = 0, nextFrame = 0, clockNow = 1000;
   const element = id => {
     const classes = new Set();
-    if (!elements.has(id)) elements.set(id, { hidden: id === 'video-canvas', complete: true, value: '123456', handlers: {}, naturalWidth: 1280, naturalHeight: 720,
+    if (!elements.has(id)) elements.set(id, { hidden: id === 'video-canvas' || id === 'disconnect', complete: true, value: '123456', handlers: {}, naturalWidth: 1280, naturalHeight: 720,
       checked: false, videoWidth: 1280, videoHeight: 720, readyState: 2, currentTime: 0,
       style: { removeProperty(name) { delete this[name]; } },
       parentElement: { getBoundingClientRect: () => mainRect },
@@ -37,6 +39,7 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
       remove() { this.hidden = true; this.removed = true; },
       insertBefore(child) { child.removed = false; },
       removeAttribute() {}, setAttribute() {}, setPointerCapture() {}, focus() {},
+      closest(selector) { return selector === `#${id}` ? this : null; },
       getBoundingClientRect() {
         if (id !== 'display' || !classes.has('ignore-browser-zoom')) return mainRect;
         const scale = Number(this.style.transform.match(/scale\((.*)\)/)[1]);
@@ -72,17 +75,21 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
   }
   class FakeEncodedVideoChunk { constructor(init) { Object.assign(this, init); } }
   const document = { createElement(tag) { assert.equal(tag, 'video'); const video = element('video'); createdVideos.push(video); return video; }, getElementById: element, fullscreenElement: null, documentElement: {},
-    addEventListener(name, fn) { documentEvents[name] = fn; },
+    addEventListener(name, fn) { (documentListeners[name] ??= []).push(fn); documentEvents[name] = fn; },
     exitFullscreen() {
       fullscreenCalls.push('exit'); this.fullscreenElement = null;
-      documentEvents.fullscreenchange(); return Promise.resolve();
+      fireDocument('fullscreenchange'); return Promise.resolve();
     },
   };
-  const enterFullscreen = () => { document.fullscreenElement = document.documentElement; documentEvents.fullscreenchange(); };
+  const enterFullscreen = () => { document.fullscreenElement = document.documentElement; fireDocument('fullscreenchange'); };
+  // `fullscreenResults` consumes one outcome per request, then falls back to the `fullscreen`
+  // default - handy for "page load rejected, first tap succeeds" browser behaviour.
+  const pendingResults = fullscreenResults === null ? [] : [...fullscreenResults];
   if (fullscreen !== 'unsupported') document.documentElement.requestFullscreen = () => {
     fullscreenCalls.push('request');
-    if (typeof fullscreen === 'function') return fullscreen(enterFullscreen);
-    if (fullscreen === 'denied') return Promise.reject(new Error('fullscreen denied'));
+    const outcome = pendingResults.length ? pendingResults.shift() : fullscreen;
+    if (typeof outcome === 'function') return outcome(enterFullscreen);
+    if (outcome === 'denied') return Promise.reject(new Error('fullscreen denied'));
     enterFullscreen(); return Promise.resolve();
   };
   const context = { document, navigator: { ...locationBrowser, mediaSession }, window: { isSecureContext: Boolean(locationBrowser), addEventListener() {}, visualViewport,
@@ -160,6 +167,9 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
       await new Promise(resolve => setImmediate(resolve));
     },
     pointer(type, x = 100, surface = 'screen') { element(surface).handlers[type]({ pointerId: 1, pointerType: 'touch', clientX: x, clientY: 100, preventDefault() {} }); },
+    // A document-level tap, with a gesture but no target element: this is what the browser
+    // requires before it will honour an automatic fullscreen request.
+    tapAnywhere(target = null) { fireDocument('pointerdown', { pointerType: 'touch', preventDefault() {}, target }); },
     flushMoves() { const callbacks = [...raf.values()]; raf.clear(); callbacks.forEach(fn => fn()); },
     retry() {
       const [id, timer] = [...timers].find(([, t]) => t.delay === 10);
@@ -216,87 +226,136 @@ test('the overlay forwards a complete drag independently of the native video ele
   assert.deepEqual(ws.sent.filter(m => m.type === 'touch').map(m => m.contacts[0].down), [true, true, false]);
 });
 
-test('the optional top bar is hidden only after connecting and restored on disconnect', async () => {
+test('the drawer Disconnect button appears only while connected and closes the drawer', async () => {
   const f = fixture();
-  f.element('hide-toolbar').checked = true;
-  const ws = await f.connect();
-  assert.equal(f.element('topbar').hidden, true);
+  assert.equal(f.element('disconnect').hidden, true, 'the button starts hidden in the HTML');
+  await f.connect();
+  assert.equal(f.element('disconnect').hidden, false);
+  f.element('settings-toggle').handlers.click();
+  assert.equal(f.element('settings-drawer').classList.contains('open'), true);
   f.element('disconnect').handlers.click();
-  assert.equal(f.element('topbar').hidden, false);
+  assert.equal(f.element('disconnect').hidden, true);
+  assert.equal(f.element('settings-drawer').classList.contains('open'), false, 'disconnecting dismisses the drawer');
+  assert.equal(f.element('pairing').hidden, false);
 });
 
-test('normal launch leaves fullscreen and the top bar unchanged', async () => {
+const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test('a plain visit leaves fullscreen alone and labels the button for entering', async () => {
   const f = fixture(); await f.connect();
   assert.deepEqual(f.fullscreenCalls, []);
   assert.equal(f.document.fullscreenElement, null);
-  assert.equal(f.element('topbar').hidden, false);
+  assert.equal(f.element('fullscreen').textContent, messages.web_full_screen);
 });
 
-test('immersive launch requests fullscreen in the submit gesture and hides the bar after connecting', async () => {
-  const f = fixture(); f.element('fullscreen-on-start').checked = true;
-  const connecting = f.connect();
+test('auto full screen asks once as the page loads, before pairing starts', async () => {
+  const f = fixture({ autoFullscreen: true });
   assert.deepEqual(f.fullscreenCalls, ['request']);
-  assert.equal(f.sockets.length, 0, 'Fullscreen must be requested before asynchronous pairing finishes');
-  assert.equal(f.element('topbar').hidden, false);
-  await connecting;
   assert.equal(f.document.fullscreenElement, f.document.documentElement);
-  assert.equal(f.element('topbar').hidden, true);
-  await f.document.exitFullscreen();
-  assert.equal(f.element('topbar').hidden, false);
-  assert.equal(f.element('display').hidden, false, 'Leaving fullscreen keeps the stream connected');
+  assert.equal(f.element('fullscreen').textContent, messages.web_exit_full_screen);
+  await f.connect();
+  assert.equal(f.element('display').hidden, false, 'a fullscreen page still connects');
 });
 
-test('disconnect exits launch-owned fullscreen and restores the pairing interface', async () => {
-  const f = fixture(); f.element('fullscreen-on-start').checked = true;
-  await f.connect(); f.element('disconnect').handlers.click();
-  assert.deepEqual(f.fullscreenCalls, ['request', 'exit']);
+test('a gesture-gated browser enters fullscreen on the first tap only', async () => {
+  const f = fixture({ autoFullscreen: true, fullscreenResults: ['denied', 'supported'] });
+  await flush();
+  assert.deepEqual(f.fullscreenCalls, ['request']);
   assert.equal(f.document.fullscreenElement, null);
-  assert.equal(f.element('topbar').hidden, false);
-  assert.equal(f.element('pairing').hidden, false);
+  f.tapAnywhere();
+  assert.deepEqual(f.fullscreenCalls, ['request', 'request']);
+  assert.equal(f.document.fullscreenElement, f.document.documentElement);
+  assert.equal(f.element('fullscreen').textContent, messages.web_exit_full_screen);
+  f.tapAnywhere();
+  assert.deepEqual(f.fullscreenCalls, ['request', 'request'], 'the first tap is the only retry');
 });
 
-test('unavailable or rejected fullscreen falls back to hiding the bar without preventing launch', async () => {
-  for (const fullscreen of ['unsupported', 'denied']) {
-    const f = fixture({ fullscreen }); f.element('fullscreen-on-start').checked = true;
+test('clearing the auto option cancels the pending first-tap retry', async () => {
+  const f = fixture({ autoFullscreen: true, fullscreenResults: ['denied', 'supported'] });
+  await flush();
+  f.element('fullscreen-on-start').checked = false;
+  f.element('fullscreen-on-start').handlers.change({});
+  assert.equal(f.preferences.get('wheelplay.fullscreenOnStart'), 'false');
+  f.tapAnywhere();
+  assert.deepEqual(f.fullscreenCalls, ['request'], 'no retry after the option is cleared');
+  assert.equal(f.document.fullscreenElement, null);
+});
+
+test('enabling the option requests fullscreen in the toggle gesture; disabling it never exits', async () => {
+  const f = fixture();
+  f.element('fullscreen-on-start').checked = true;
+  f.element('fullscreen-on-start').handlers.change({});
+  assert.deepEqual(f.fullscreenCalls, ['request']);
+  assert.equal(f.document.fullscreenElement, f.document.documentElement);
+  assert.equal(f.preferences.get('wheelplay.fullscreenOnStart'), 'true');
+  f.element('fullscreen-on-start').checked = false;
+  f.element('fullscreen-on-start').handlers.change({});
+  assert.equal(f.fullscreenCalls.includes('exit'), false, 'clearing auto full screen leaves a chosen fullscreen alone');
+  assert.equal(f.document.fullscreenElement, f.document.documentElement);
+});
+
+test('the one-shot button toggles fullscreen and cancels a pending automatic request', async () => {
+  const f = fixture({ autoFullscreen: true, fullscreenResults: ['denied', 'supported'] });
+  await flush();
+  await f.element('fullscreen').handlers.click();
+  assert.deepEqual(f.fullscreenCalls, ['request', 'request']);
+  assert.equal(f.document.fullscreenElement, f.document.documentElement);
+  assert.equal(f.element('fullscreen').textContent, messages.web_exit_full_screen);
+  await f.element('fullscreen').handlers.click();
+  assert.deepEqual(f.fullscreenCalls, ['request', 'request', 'exit']);
+  assert.equal(f.document.fullscreenElement, null);
+  assert.equal(f.element('fullscreen').textContent, messages.web_full_screen);
+  f.tapAnywhere();
+  assert.equal(f.fullscreenCalls.filter(call => call === 'request').length, 2,
+    'the manual exit is not undone by the automatic retry');
+});
+
+test('the first tap on a fullscreen control belongs to that control, not the automatic request', async () => {
+  const f = fixture({ autoFullscreen: true, fullscreenResults: ['denied'] });
+  await flush();
+  assert.deepEqual(f.fullscreenCalls, ['request'], 'the page-load request was refused');
+  f.tapAnywhere(f.element('fullscreen'));
+  assert.deepEqual(f.fullscreenCalls, ['request'], 'no automatic retry races the button');
+  await f.element('fullscreen').handlers.click();
+  assert.deepEqual(f.fullscreenCalls, ['request', 'request']);
+  assert.equal(f.document.fullscreenElement, f.document.documentElement);
+
+  const toggle = fixture({ autoFullscreen: true, fullscreenResults: ['denied'] });
+  await flush();
+  toggle.tapAnywhere(toggle.element('fullscreen-on-start'));
+  assert.deepEqual(toggle.fullscreenCalls, ['request'], 'tapping the option does not auto-enter fullscreen');
+  assert.equal(toggle.document.fullscreenElement, null);
+});
+
+test('auto full screen is page-level: disconnect and pairing failure leave it intact', async () => {
+  const connected = fixture({ autoFullscreen: true });
+  await connected.connect();
+  connected.element('disconnect').handlers.click();
+  assert.equal(connected.fullscreenCalls.includes('exit'), false);
+  assert.equal(connected.document.fullscreenElement, connected.document.documentElement);
+  assert.equal(connected.element('pairing').hidden, false);
+
+  const failed = fixture({ autoFullscreen: true, codeDenied: true });
+  failed.element('connect-form').handlers.submit({ preventDefault() {} });
+  await flush();
+  assert.equal(failed.sockets.length, 0);
+  assert.deepEqual(failed.fullscreenCalls, ['request']);
+  assert.equal(failed.document.fullscreenElement, failed.document.documentElement);
+  assert.equal(failed.element('pairing').hidden, false);
+  assert.equal(failed.element('connect').disabled, false);
+});
+
+test('an unsupported or refusing browser still connects without a pending retry', async () => {
+  for (const options of [{ fullscreen: 'unsupported' }, { fullscreen: 'denied' }]) {
+    const f = fixture({ autoFullscreen: true, ...options });
+    await flush();
     await f.connect();
-    assert.equal(f.document.fullscreenElement, null);
-    assert.equal(f.element('topbar').hidden, true);
     assert.equal(f.element('display').hidden, false);
+    f.tapAnywhere();
+    assert.equal(f.document.fullscreenElement, null);
     f.element('disconnect').handlers.click();
-    assert.equal(f.element('topbar').hidden, false);
     assert.equal(f.fullscreenCalls.includes('exit'), false);
   }
-});
-
-test('pairing failure exits launch-owned fullscreen without hiding the pairing interface', async () => {
-  const f = fixture({ codeDenied: true }); f.element('fullscreen-on-start').checked = true;
-  f.element('connect-form').handlers.submit({ preventDefault() {} });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(f.sockets.length, 0);
-  assert.deepEqual(f.fullscreenCalls, ['request', 'exit']);
-  assert.equal(f.document.fullscreenElement, null);
-  assert.equal(f.element('topbar').hidden, false);
-  assert.equal(f.element('pairing').hidden, false);
-  assert.equal(f.element('connect').disabled, false);
-});
-
-test('a fullscreen request that completes after disconnect is released', async () => {
-  let complete;
-  const f = fixture({ fullscreen: enter => new Promise(resolve => { complete = () => { enter(); resolve(); }; }) });
-  f.element('fullscreen-on-start').checked = true;
-  await f.connect(); f.element('disconnect').handlers.click();
-  complete(); await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(f.fullscreenCalls, ['request', 'exit']);
-  assert.equal(f.document.fullscreenElement, null);
-  assert.equal(f.element('topbar').hidden, false);
-});
-
-test('disconnect leaves fullscreen that was already active before launch intact', async () => {
-  const f = fixture(); f.document.fullscreenElement = f.document.documentElement;
-  f.element('fullscreen-on-start').checked = true;
-  await f.connect(); f.element('disconnect').handlers.click();
-  assert.deepEqual(f.fullscreenCalls, []);
-  assert.equal(f.document.fullscreenElement, f.document.documentElement);
 });
 
 test('actual image onload retries ACK and preserves down/up during browser congestion', async () => {
@@ -667,7 +726,7 @@ test('versioned pointer cancellation sends a cancel command while ordinary up st
 });
 
 test('a source gap releases touch, keeps the picture, and expires with no more status messages', async () => {
-  const f = fixture(); f.element('hide-toolbar').checked = true; const ws = await f.connect(); mediaStatus(ws);
+  const f = fixture(); const ws = await f.connect(); mediaStatus(ws);
   ws.onmessage({ data: videoPacket(1) }); finishJpeg(f);
   f.pointer('pointerdown', 100, 'touch-surface');
   mediaStatus(ws, { sourceState: 'recovering', streaming: false, inputReady: false });
@@ -684,12 +743,12 @@ test('a source gap releases touch, keeps the picture, and expires with no more s
   mediaStatus(ws); assert.equal(f.element('waiting').hidden, true);
 });
 
-test('the touch-paused overlay is suppressed while the top bar is visible', async () => {
+test('the touch-paused overlay stays visible because the drawer status is closed while driving', async () => {
   const f = fixture(), ws = await f.connect(); mediaStatus(ws);
   ws.onmessage({ data: videoPacket(1) }); finishJpeg(f);
   mediaStatus(ws, { sourceState: 'recovering', streaming: false, inputReady: false });
-  assert.equal(f.element('topbar').hidden, false);
-  assert.equal(f.element('media-message').hidden, true);
+  assert.equal(f.element('media-message').hidden, false);
+  assert.match(f.element('media-message').textContent, /触控已暂停/);
 });
 
 test('status during JPEG decoding leaves the old image and its input geometry intact', async () => {

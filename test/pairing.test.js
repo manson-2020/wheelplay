@@ -127,7 +127,7 @@ test('?manual=1 QR approval remembers the browser and waits for the explicit lau
   assert.equal(f.sockets.length, 0);
   assert.equal(f.element('connect-label').textContent, '启动显示');
   assert.deepEqual(JSON.parse(f.preferences.get('wheelplay.browserDevice')), savedDevice);
-  f.element('hide-toolbar').checked = true; f.element('renderer-video-canvas').checked = true;
+  f.element('renderer-video-canvas').checked = true;
   f.submit(); await settle();
   assert.equal(f.sockets.length, 1);
   assert.equal(f.sockets[0].url, 'ws://server:8080/stream?token=resumed-token&media=2&images=3&nowPlaying=1');
@@ -267,16 +267,22 @@ test('disabled HTTPS removes the link and explains the app setting', async () =>
   assert.match(f.element('tls-fingerprint').textContent, /HTTPS 已关闭.*Web 监听/);
 });
 
-test('top-bar and fullscreen options are restored from storage and persist on change', () => {
-  const f = fixture({ storedOptions: { 'wheelplay.hideToolbar': 'false', 'wheelplay.fullscreenOnStart': 'true' } });
-  assert.equal(f.element('hide-toolbar').checked, false);
+test('the auto full screen option is restored from storage and persists on change', () => {
+  const f = fixture({ storedOptions: { 'wheelplay.fullscreenOnStart': 'true' } });
   assert.equal(f.element('fullscreen-on-start').checked, true);
-  f.element('hide-toolbar').checked = true;
-  f.element('hide-toolbar').handlers.change({});
-  assert.equal(f.preferences.get('wheelplay.hideToolbar'), 'true');
+  assert.equal(f.element('fullscreen').textContent, messages.web_full_screen,
+    'the button stays a separate one-shot control');
   f.element('fullscreen-on-start').checked = false;
   f.element('fullscreen-on-start').handlers.change({});
   assert.equal(f.preferences.get('wheelplay.fullscreenOnStart'), 'false');
+});
+
+test('the pairing page keeps a Settings entry that opens the drawer', () => {
+  const f = fixture();
+  f.element('settings-toggle').handlers.click();
+  assert.equal(f.drawerOpen(), true);
+  f.element('settings-close').handlers.click();
+  assert.equal(f.drawerOpen(), false);
 });
 
 test('the drawer debug entry flips its label with the diag parameter', () => {

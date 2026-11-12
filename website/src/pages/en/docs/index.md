@@ -51,12 +51,12 @@ This website provides downloads and instructions. Use the local address in the a
 ## Open the page and connect
 
 1. Open the address shown in the app in the car browser. The page obtains credentials and connects on its own - no QR scan, pairing code, or "Start display" click.
-2. Display options live behind the floating, draggable **circular status disc** (battery / network / volume): tap it to slide the panel in from the right. The top-bar Settings button also works before connecting. Options such as hiding the top bar, fullscreen, video renderer, browser zoom, location and HTTPS use stored defaults before the connection starts.
+2. Connection status and display options live behind the floating, draggable **circular status disc** (battery / network / volume): tap it to slide the drawer in from the right. The **Settings** button on the pairing page also works before connecting. The drawer holds Disconnect, an **Auto full screen** preference, a one-shot **Full screen / Exit full screen** button, video renderer, browser zoom, location and HTTPS options, using stored defaults before the connection starts.
 3. Start a connection in the app using the [instructions for your source](/en/docs/sources/). For CarPlay, keep the app in the foreground during setup, complete device permissions, and allow CarPlay on the iPhone.
 4. View and control the connected source in the car browser. VNC also supports a mouse and physical keyboard; view-only mode disables remote input.
 5. Only one source runs at a time. If switching sources disconnects the browser, the page reconnects automatically.
 
-Add `?manual=1` to restore the old QR/code launch page when troubleshooting. A page load has no user gesture, so the automatic fullscreen request is rejected (only the top bar is hidden); one more tap inside the page enables fullscreen and audio / microphone permission.
+Add `?manual=1` to restore the old QR/code launch page when troubleshooting. With **Auto full screen** on, each page load requests fullscreen and browsers that need a user gesture enter it on the first tap; audio / microphone permission also needs one tap.
 
 Remembered browsers connect on every later visit. Clearing browser data, disabling storage, switching between HTTP and HTTPS, or changing the access address re-establishes trust automatically.
 

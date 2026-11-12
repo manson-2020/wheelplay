@@ -83,10 +83,9 @@ if (typeof document !== 'undefined') {
   let heartbeat = null, movePending = false, moveGeneration = 0, outbox = null;
   let authGeneration = 0, deviceCredential = null;
   let userDisconnected = false, autoRetryTimer = null;
-  let launchPresentation = null;
-  // Set when an automatic fullscreen request was rejected for lack of a user gesture; the next
-  // tap anywhere in the page re-requests it, mirroring the "one more tap enables fullscreen" note.
-  let immersiveRetry = false;
+  // "Auto full screen" is a page-level preference, independent of the connection: every page load
+  // asks once, and a browser that needs a gesture gets one retry on the first tap anywhere.
+  let autoFullscreenPending = false;
   const locationOption = $('browser-location');
   locationOption.checked = false; // Never inherit form restoration or grant consent through storage.
   const browserLocation = createBrowserLocation({ send: data => send(data), onState(enabled, message, key) {
@@ -123,34 +122,33 @@ if (typeof document !== 'undefined') {
     storage.set(ignoreZoomPreference, String(ignoreZoomOption.checked));
     release(); syncDisplayZoom(); scheduleViewportReport();
   });
-  // Top-bar and fullscreen options persist across visits; defaults live in the HTML (top bar on,
-  // fullscreen off) and apply when storage is unavailable.
-  const hideToolbarOption = $('hide-toolbar');
+  // The id and storage key keep their historical "on start" names so an existing preference
+  // survives the rename to "Auto full screen". This is a page-level preference, not a connection
+  // one: turning it off never tears down a fullscreen the user chose with the button below.
   const fullscreenOption = $('fullscreen-on-start');
-  const hideToolbarPreference = 'wheelplay.hideToolbar';
   const fullscreenPreference = 'wheelplay.fullscreenOnStart';
-  const storedHideToolbar = storage.get(hideToolbarPreference);
-  if (storedHideToolbar !== null) hideToolbarOption.checked = storedHideToolbar === 'true';
   fullscreenOption.checked = storage.get(fullscreenPreference) === 'true';
-  hideToolbarOption.addEventListener('change', () => {
-    storage.set(hideToolbarPreference, String(hideToolbarOption.checked));
-    if (!$('display').hidden) {
-      $('topbar').hidden = hideToolbarOption.checked || Boolean(launchPresentation?.immersive);
+  // Ask once per page load. A browser without a user gesture rejects the request; `pending` then
+  // lets the first tap anywhere retry it exactly once. `retryOnGesture` is false for that retry,
+  // so a second failure never re-arms against a manual exit.
+  function requestAutoFullscreen(retryOnGesture = true) {
+    if (document.fullscreenElement || !document.documentElement?.requestFullscreen) {
+      autoFullscreenPending = false;
+      return;
     }
-  });
+    let request;
+    try { request = Promise.resolve(document.documentElement.requestFullscreen()); }
+    catch (_) { request = Promise.reject(); }
+    request.then(() => { autoFullscreenPending = false; },
+      () => { autoFullscreenPending = retryOnGesture && fullscreenOption.checked; });
+  }
   fullscreenOption.addEventListener('change', () => {
     storage.set(fullscreenPreference, String(fullscreenOption.checked));
-    if (fullscreenOption.checked) {
-      // The toggle itself is a user gesture, so this request is allowed right here.
-      immersiveRetry = false;
-      if (!document.fullscreenElement && document.documentElement?.requestFullscreen) {
-        try { Promise.resolve(document.documentElement.requestFullscreen()).catch(() => {}); } catch (_) {}
-      }
-    } else {
-      immersiveRetry = false;
-      if (launchPresentation?.ownsFullscreen && document.fullscreenElement) exitLaunchFullscreen();
-    }
+    // The toggle itself is a user gesture, so the request is allowed right here.
+    if (fullscreenOption.checked) requestAutoFullscreen();
+    else autoFullscreenPending = false;
   });
+  if (fullscreenOption.checked) requestAutoFullscreen();
   const presentation = createPresentationController({ onChange: renderPresentation });
   const jpeg = createJpegPresenter(screens, {
     onFrame: (meta, frameWidth, frameHeight) => {
@@ -586,11 +584,11 @@ if (typeof document !== 'undefined') {
     const panel = $('diag-panel');
     panel.hidden = !diagnosticStatus;
     if (diagnosticStatus) panel.textContent = [detail, schemeLine].filter(Boolean).join('\n');
-    // The overlay is the only status surface after the top bar is hidden; never duplicate a
-    // status line that is already on screen.
-    const topbarHidden = $('topbar').hidden;
-    $('media-message').hidden = !value.visible || value.interactive || !topbarHidden;
-    $('media-message').textContent = value.visible && !value.interactive && topbarHidden ? $('status').textContent : '';
+    // The status line now lives inside the drawer, which stays closed while driving. The picture
+    // overlay is therefore the only visible surface for a "picture is up but touch is not" warning.
+    const showWarning = value.visible && !value.interactive;
+    $('media-message').hidden = !showWarning;
+    $('media-message').textContent = showWarning ? $('status').textContent : '';
   }
   function clearHeldFrame() {
     heldFrame.hidden = true; heldFrame.width = heldFrame.height = 0;
@@ -616,44 +614,17 @@ if (typeof document !== 'undefined') {
     performanceStats.source = performanceStats.transport = performanceStats.receiver = performanceStats.image = null;
     rendererStats.activeMode = 'waiting';
   }
-  function exitLaunchFullscreen() {
-    try { Promise.resolve(document.exitFullscreen()).catch(() => {}); } catch (_) {}
-  }
-  function prepareLaunchPresentation() {
-    const presentation = { immersive: $('fullscreen-on-start').checked, ownsFullscreen: false, cancelled: false };
-    launchPresentation = presentation;
-    if (!presentation.immersive || document.fullscreenElement || !document.documentElement?.requestFullscreen) return;
-    presentation.ownsFullscreen = true;
-    try {
-      // Keep the request in the submit gesture, before asynchronous pairing or WebSocket setup.
-      Promise.resolve(document.documentElement.requestFullscreen()).then(() => {
-        if (presentation.cancelled && !launchPresentation?.immersive && document.fullscreenElement) exitLaunchFullscreen();
-      }).catch(() => {
-        presentation.ownsFullscreen = false;
-        // Auto-connecting pages have no gesture: remember the wish and retry on the first tap.
-        if (!presentation.cancelled) immersiveRetry = true;
-      });
-    } catch (_) { presentation.ownsFullscreen = false; }
-  }
-  function restoreLaunchPresentation() {
-    immersiveRetry = false;
-    if (!launchPresentation) return;
-    launchPresentation.cancelled = true;
-    launchPresentation.immersive = false;
-    if (launchPresentation.ownsFullscreen && document.fullscreenElement) exitLaunchFullscreen();
-  }
-  // A rejected automatic request retries on the next user gesture anywhere in the page.
-  document.addEventListener('pointerdown', () => {
-    if (!immersiveRetry) return;
-    if (document.fullscreenElement || !$('fullscreen-on-start').checked || !document.documentElement?.requestFullscreen) {
-      immersiveRetry = false;
-      return;
-    }
-    immersiveRetry = false;
-    try {
-      Promise.resolve(document.documentElement.requestFullscreen()).catch(() => { immersiveRetry = true; });
-    } catch (_) {}
-  });
+  // A page load has no user gesture. Browsers that gate fullscreen therefore keep the wish
+  // pending until the very first tap; one attempt per visit, so a manual toggle is never undone.
+  document.addEventListener('pointerdown', event => {
+    if (!autoFullscreenPending) return;
+    autoFullscreenPending = false;
+    // A tap on either fullscreen control is an explicit choice: let that control's own handler
+    // own the state, otherwise an automatic request and a toggle would race and cancel out.
+    if (event.target?.closest?.('#fullscreen') || event.target?.closest?.('#fullscreen-on-start')) return;
+    if (document.fullscreenElement || !fullscreenOption.checked) return;
+    requestAutoFullscreen(false);
+  }, { capture: true });
   // Every teardown path - an explicit disconnect, a socket drop, a page hide - releases the same
   // resources in the same order; keeping it in one function is what keeps the paths in step.
   function teardownSession() {
@@ -667,13 +638,12 @@ if (typeof document !== 'undefined') {
   function disconnect(refreshQr = true) {
     stopQr();
     authGeneration++;
-    restoreLaunchPresentation();
     stopped = true; paired = false; release();
     if (outbox) { outbox.close(); outbox = null; }
     clearTimeout(retry); clearInterval(heartbeat);
     if (socket) { const old = socket; socket = null; old.close(); }
     teardownSession();
-    $('topbar').hidden = false; $('pairing').hidden = false; $('display').hidden = true;
+    $('pairing').hidden = false; $('display').hidden = true;
     syncDisplayZoom();
     $('disconnect').hidden = true; $('connect').disabled = false;
     $('status').textContent = t("web_disconnected");
@@ -904,7 +874,6 @@ if (typeof document !== 'undefined') {
       $('phone-connect').disabled = false;
       $('phone-connect-message').textContent = t("web_keep_wheelplay_in_the_foreground_on_android_tap_connect");
       $('pairing').hidden = true; $('display').hidden = false; $('disconnect').hidden = false;
-      $('topbar').hidden = $('hide-toolbar').checked || Boolean(launchPresentation?.immersive);
       lastViewportSignature = '';
       scheduleViewportReport();
       $('status').textContent = t("web_connected_waiting_for_video");
@@ -1069,7 +1038,6 @@ if (typeof document !== 'undefined') {
   function launch() {
     launchMode = selectedMode;
     const generation = ++authGeneration;
-    prepareLaunchPresentation();
     stopQr(); $('connect').disabled = true; $('message').textContent = '';
     const start = () => { if (generation === authGeneration) { stopped = false; attempts = 0; connect(); } };
     if (pairingToken && !deviceCredential) { start(); return; }
@@ -1087,7 +1055,6 @@ if (typeof document !== 'undefined') {
         start();
       } catch (error) {
         if (generation !== authGeneration) return;
-        restoreLaunchPresentation();
         $('connect').disabled = false;
         if (error.status === 401 && deviceCredential) {
           pairingToken = null; deviceCredential = null;
@@ -1123,8 +1090,19 @@ if (typeof document !== 'undefined') {
     $('phone-connect').disabled = true;
     $('phone-connect-message').textContent = t("web_requesting_iphone_connection");
   });
-  $('disconnect').addEventListener('click', () => { userDisconnected = true; disconnect(); });
+  $('disconnect').addEventListener('click', () => {
+    userDisconnected = true;
+    setSettingsOpen(false);
+    disconnect();
+  });
+  // A one-shot toggle for this visit only: it neither changes nor is changed by the auto option.
+  function syncFullscreenButton() {
+    $('fullscreen').textContent = document.fullscreenElement ? t("web_exit_full_screen") : t("web_full_screen");
+  }
   $('fullscreen').addEventListener('click', async () => {
+    // A manual toggle owns this visit's fullscreen state - cancel any pending automatic request,
+    // otherwise a later tap could drag the user back into fullscreen after they chose to leave.
+    autoFullscreenPending = false;
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
       else if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
@@ -1132,14 +1110,10 @@ if (typeof document !== 'undefined') {
     } catch (_) { $('status').textContent = t("web_use_the_browser_menu_to_toggle_full_screen"); }
   });
   document.addEventListener('fullscreenchange', () => {
-    $('fullscreen').textContent = document.fullscreenElement ? t("web_exit_full_screen") : t("web_full_screen");
-    if (!document.fullscreenElement && launchPresentation?.immersive) {
-      launchPresentation.immersive = false;
-      launchPresentation.ownsFullscreen = false;
-      $('topbar').hidden = false;
-    }
+    syncFullscreenButton();
     scheduleViewportReport();
   });
+  syncFullscreenButton();
   // A separate layer prevents Android Chrome's native video gestures cancelling drags.
   function bindSurface(surface) {
     desktop.bind(surface);

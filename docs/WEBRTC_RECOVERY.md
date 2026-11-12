@@ -105,7 +105,7 @@ H.264 与 H.265 都能直连。两个前提条件容易漏：别名所在的 TUN
 （`fallback=<reason> conn=… ice=… gather=… [track=1]`）。回退记录保留到下一次成功显示首帧为止，
 重试间隙拍屏也能看到；`mdns` 候选数、`setup` 角色和 `conn` 状态是判断车机端卡在哪一步的依据。
 
-车机上可用 `?diag=1` 看到 WebRTC 现场：状态行只保留简短的 ` · WebRTC: <reason|ok|idle>`（顶栏高度固定，长文本会溢出遮住画面），能力快照与上面的 answer / fallback 详情一起放进画面左下角的独立诊断框（可滚动、不拦截触控），不依赖 devtools / adb；`?unhide=1` 让首帧前的 video 保持视口内 1 px、`opacity:0`  的布局盒（`pending-video`）而不是 `display:none`，用于验证老 Chromium 是否不解码隐藏元素（原生 Video 与兼容 Canvas 模式有 video 元素；直接 Canvas 模式不需要）。二者都只是开关，默认行为不变。HEVC 被拒后状态栏提示「此车机无法解码 HEVC，WheelPlay 正在改用 H.264 重新连接」，随后自动重建会话。
+车机上可用 `?diag=1` 看到 WebRTC 现场：状态行只保留简短的 ` · WebRTC: <reason|ok|idle>`（抽屉状态区空间有限，长文本会挤占设置项），能力快照与上面的 answer / fallback 详情一起放进画面左下角的独立诊断框（可滚动、不拦截触控），不依赖 devtools / adb；`?unhide=1` 让首帧前的 video 保持视口内 1 px、`opacity:0`  的布局盒（`pending-video`）而不是 `display:none`，用于验证老 Chromium 是否不解码隐藏元素（原生 Video 与兼容 Canvas 模式有 video 元素；直接 Canvas 模式不需要）。二者都只是开关，默认行为不变。HEVC 被拒后状态行提示「此车机无法解码 HEVC，WheelPlay 正在改用 H.264 重新连接」，随后自动重建会话。
 
 ## 排查与真机验证
 

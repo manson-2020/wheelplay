@@ -60,3 +60,27 @@ test('Android exports every browser template and literal message key, not just t
   }
   for (const key of required) if (key !== 'locale') assert.ok(keys.has(key), `Android BrowserStrings is missing ${key}`);
 });
+
+test('connection status and its actions live in the drawer, with no top bar or hide option', () => {
+  assert.doesNotMatch(template, /<header|id="topbar"|id="hide-toolbar"/);
+  const aside = template.indexOf('<aside id="settings-drawer"');
+  const end = template.indexOf('</aside>');
+  assert.ok(aside > 0 && end > aside);
+  for (const id of ['status', 'fullscreen', 'disconnect', 'diag-toggle', 'settings-close']) {
+    const at = template.indexOf(`id="${id}"`);
+    assert.ok(at > aside && at < end, `${id} must live inside the drawer`);
+  }
+  assert.ok(template.indexOf('id="settings-toggle"') < aside, 'the pairing page keeps a drawer entry');
+});
+
+test('auto full screen is a preference and the footer button is a separate one-shot toggle', () => {
+  const option = template.match(/<label class="launch-option" for="fullscreen-on-start">[\s\S]*?<\/label>/);
+  assert.ok(option, 'the auto full screen option exists');
+  assert.match(option[0], /\{\{web_auto_full_screen\}\}/);
+  assert.match(option[0], /\{\{web_auto_full_screen_help\}\}/);
+  assert.doesNotMatch(template, /web_hide_top_bar_enter_full_screen_on_start|web_enter_full_screen_when_starting_and_hide_the_top/);
+  assert.match(template, /id="fullscreen" type="button"[^>]*>\{\{web_full_screen\}\}/);
+  const body = template.indexOf('class="drawer-body"'), foot = template.indexOf('class="drawer-foot"');
+  assert.ok(template.indexOf('id="fullscreen-on-start"') > body, 'the preference is in the scrolling settings');
+  assert.ok(template.indexOf('id="fullscreen"') > foot, 'the one-shot button is in the fixed footer');
+});

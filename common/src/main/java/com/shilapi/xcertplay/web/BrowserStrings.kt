@@ -126,13 +126,8 @@ internal object BrowserStrings {
                 UiR.string.web_for_the_first_connection_tap_scan_qr_code_to,
             "web_then_scan_the_qr_code_below_and_allow_the" to
                 UiR.string.web_then_scan_the_qr_code_below_and_allow_the,
-            "web_hide_top_bar_after_connecting" to UiR.string.web_hide_top_bar_after_connecting,
-            "web_let_carplay_fill_the_page_refresh_to_return_to" to
-                UiR.string.web_let_carplay_fill_the_page_refresh_to_return_to,
-            "web_hide_top_bar_enter_full_screen_on_start" to
-                UiR.string.web_hide_top_bar_enter_full_screen_on_start,
-            "web_enter_full_screen_when_starting_and_hide_the_top" to
-                UiR.string.web_enter_full_screen_when_starting_and_hide_the_top,
+            "web_auto_full_screen" to UiR.string.web_auto_full_screen,
+            "web_auto_full_screen_help" to UiR.string.web_auto_full_screen_help,
             "web_enter_debug_mode" to UiR.string.web_enter_debug_mode,
             "web_exit_debug_mode" to UiR.string.web_exit_debug_mode,
             "web_display_video_with_canvas_experimental" to
