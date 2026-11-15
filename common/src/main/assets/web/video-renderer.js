@@ -1,15 +1,18 @@
+import { createCanvasFramePainter } from './canvas-frame-painter.js';
+
 // Keep the decoder in the DOM, outside the viewport. display:none/hidden can
 // suppress video frame callbacks on embedded browsers. drawImage copies decoded
 // frames directly; it does not read pixels back through getImageData.
 export function createVideoCanvasRenderer(video, canvas, {
   onFrame = () => {}, onDraw = () => {}, onError = () => {},
+  webgl = false,
   requestFrame = callback => requestAnimationFrame(callback), cancelFrame = id => cancelAnimationFrame(id),
   now = () => performance.now(),
   // A 1 px layout box inside the viewport until the first frame. Some head-unit builds
   // never decode a video element that is display:none or positioned offscreen.
   keepVisible = false,
 } = {}) {
-  let context = null, running = false, generation = 0, videoCallback = null, animationCallback = null;
+  let painter = null, running = false, generation = 0, videoCallback = null, animationCallback = null;
   let lastVideoCallbackAt = 0, lastFrameKey = null;
   function prepare() {
     video.classList?.toggle('pending-video', keepVisible);
@@ -20,12 +23,16 @@ export function createVideoCanvasRenderer(video, canvas, {
     running = false; generation++;
     if (videoCallback !== null && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(videoCallback);
     if (animationCallback !== null) cancelFrame(animationCallback);
-    videoCallback = animationCallback = null; context = null; lastFrameKey = null;
+    videoCallback = animationCallback = null; painter?.dispose(); painter = null; lastFrameKey = null;
     video.hidden = true;
     video.classList?.toggle('offscreen-video', false); video.classList?.toggle('pending-video', false);
     canvas.hidden = true; canvas.width = canvas.height = 0;
   }
-  function fail(error) { stop(); onError(error); }
+  function fail(error) {
+    // Let the receiver freeze the last picture before stop() clears the canvas.
+    const token = generation;
+    try { onError(error); } finally { if (generation === token) stop(); }
+  }
   function draw(metadata = null, stalled = false) {
     if (!running || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
     try {
@@ -38,7 +45,7 @@ export function createVideoCanvasRenderer(video, canvas, {
       const key = !stalled && frames > 0 ? `frame:${frames}` : Number.isFinite(time) ? `time:${time}` : null;
       if (!resized && key !== null && key === lastFrameKey) return;
       if (resized) { canvas.width = width; canvas.height = height; }
-      context.drawImage(video, 0, 0, width, height);
+      painter.draw(video, width, height);
       onDraw();
       lastFrameKey = key;
       const first = canvas.hidden;
@@ -51,8 +58,7 @@ export function createVideoCanvasRenderer(video, canvas, {
   function start() {
     stop(); prepare();
     try {
-      context = canvas.getContext('2d', { alpha: false });
-      if (!context) throw Object.assign(new Error('Canvas 2D unavailable'), { name: 'NotSupportedError' });
+      painter = createCanvasFramePainter(canvas, { webgl, onError: fail });
       running = true; lastVideoCallbackAt = now();
       const token = generation, current = () => running && token === generation;
       const observe = (_, metadata) => {
@@ -74,7 +80,7 @@ export function createVideoCanvasRenderer(video, canvas, {
       animationCallback = requestFrame(refresh);
     } catch (error) { fail(error); }
   }
-  return { prepare, start, stop };
+  return { prepare, start, stop, get backend() { return painter?.backend ?? null; } };
 }
 
 // Every failure used to look identical from the phone; the reason now travels with the
@@ -91,16 +97,18 @@ export function videoRendererPreference(value, legacy) {
 // A reader owns each VideoFrame until it is drawn or discarded, including after stop.
 export function createTrackCanvasRenderer(canvas, {
   onReady = () => {}, onResize = () => {}, onError = () => {},
+  webgl = false,
   createProcessor = init => new MediaStreamTrackProcessor(init),
 } = {}) {
-  let generation = 0, reader = null, running = false, width = 0, height = 0, renderedFrames = 0;
+  let generation = 0, reader = null, painter = null, running = false, width = 0, height = 0, renderedFrames = 0;
   function stop() {
     generation++; running = false;
     const old = reader; reader = null;
     if (old) { try { Promise.resolve(old.cancel()).catch(() => {}); } catch (_) {} }
+    painter?.dispose(); painter = null;
     canvas.hidden = true; canvas.width = canvas.height = 0;
   }
-  async function consume(activeReader, context, token) {
+  async function consume(activeReader, activePainter, token) {
     const current = () => running && generation === token;
     try {
       while (current()) {
@@ -111,7 +119,7 @@ export function createTrackCanvasRenderer(canvas, {
           if (!frame || !(frame.displayWidth > 0) || !(frame.displayHeight > 0)) continue;
           const resized = width !== frame.displayWidth || height !== frame.displayHeight;
           if (resized) { canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; }
-          context.drawImage(frame, 0, 0, frame.displayWidth, frame.displayHeight);
+          activePainter.draw(frame, frame.displayWidth, frame.displayHeight);
           width = frame.displayWidth; height = frame.displayHeight; renderedFrames++;
           canvas.hidden = false;
           if (renderedFrames === 1) onReady({ width, height });
@@ -133,21 +141,20 @@ export function createTrackCanvasRenderer(canvas, {
     start(track) {
       stop(); width = height = renderedFrames = 0;
       try {
-        const context = canvas.getContext('2d', { alpha: false });
-        if (!context) throw Object.assign(new Error('Canvas 2D unavailable'), { name: 'NotSupportedError' });
+        painter = createCanvasFramePainter(canvas, { webgl, onError: error => onError('renderer-error', isRtcErrorRetryable(error)) });
         reader = createProcessor({ track, maxBufferSize: 1 }).readable.getReader();
         running = true;
-        void consume(reader, context, generation);
+        void consume(reader, painter, generation);
       } catch (error) { stop(); onError('renderer-error', isRtcErrorRetryable(error)); }
     },
     stop,
-    snapshot: () => ({ width, height, renderedFrames, presentedFrames: null }),
+    snapshot: () => ({ width, height, renderedFrames, presentedFrames: null, renderBackend: painter?.backend ?? null }),
   };
 }
 
 // Video elements exist only for the two legacy renderers, and belong to one offer.
 export function createVideoRenderer(mode, canvas, {
-  createVideo, onReady = () => {}, onResize = () => {}, onError = () => {}, keepVisible = false,
+  createVideo, onReady = () => {}, onResize = () => {}, onError = () => {}, keepVisible = false, webgl = false,
 } = {}) {
   let video = null, copy = null, frameCallback = null, generation = 0, ready = false, started = false;
   let width = 0, height = 0, presentedFrames = null, renderedFrames = mode === 'video-canvas' ? 0 : null;
@@ -182,6 +189,7 @@ export function createVideoRenderer(mode, canvas, {
         const token = generation, current = () => video !== null && token === generation;
         if (mode === 'video-canvas') {
           copy = createVideoCanvasRenderer(video, canvas, {
+            webgl,
             onDraw: () => { renderedFrames++; }, onFrame: report, keepVisible,
             onError: error => { if (current()) onError('renderer-error', isRtcErrorRetryable(error)); },
           });
@@ -212,7 +220,7 @@ export function createVideoRenderer(mode, canvas, {
       } catch (error) { onError('renderer-error', isRtcErrorRetryable(error)); }
     },
     stop,
-    snapshot: () => ({ width, height, presentedFrames, renderedFrames }),
+    snapshot: () => ({ width, height, presentedFrames, renderedFrames, renderBackend: copy?.backend ?? (mode === 'native' ? 'native' : null) }),
   };
 }
 

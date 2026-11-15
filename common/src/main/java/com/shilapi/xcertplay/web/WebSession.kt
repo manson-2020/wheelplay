@@ -191,6 +191,11 @@ internal object WebSession {
     val hasViewer
         get() = server?.hasViewer == true || secureServer?.hasViewer == true
 
+    fun requestSettings() {
+        server?.requestSettings()
+        secureServer?.requestSettings()
+    }
+
     val imageFormat: ImageFormat
         get() = if (server?.hasViewer == true) server?.imageFormat ?: ImageFormat.JPEG
             else secureServer?.imageFormat ?: ImageFormat.JPEG
@@ -561,6 +566,24 @@ internal object WebSession {
             LanTls.saveCustom(context, prepared)
         }
 
+    /** Snapshot the current SANs and install the signer through the existing rollback path. */
+    @Synchronized
+    fun installSigningCa(
+        context: Context,
+        certificates: ByteArray,
+        privateKey: ByteArray,
+        password: CharArray = CharArray(0),
+    ): String? {
+        val config = TeslaHttpCompatibility.config(context)
+        return LanTls.prepareSigningCaPem(
+            certificates,
+            privateKey,
+            password,
+            (addresses(context).map { it.address } + config.accessAddress).distinct(),
+            WebListenSettings.hostname(context),
+        ).use { installCertificate(context, it) }
+    }
+
     @Synchronized
     fun setHttpsEnabled(context: Context, enabled: Boolean): String? =
         runCatching {
@@ -622,6 +645,7 @@ internal object WebSession {
                         WebListenSettings.hostname(context),
                     )
                 replaceHttps(context, WebListenSettings.httpsPort(context), endpoint) {
+                    WebListenSettings.saveBundledCaEnabled(context, false)
                     LanTls.clearCustom(context)
                 }
             }
@@ -631,6 +655,18 @@ internal object WebSession {
                     it.userMessage(context),
                 )
             }
+
+    fun useBundledCertificate(context: Context): String? =
+        runCatching {
+            val config = TeslaHttpCompatibility.config(context)
+            val endpoint = LanTls.createBundled(context,
+                (addresses(context).map { it.address } + config.accessAddress).distinct(),
+                WebListenSettings.hostname(context))
+            replaceHttps(context, WebListenSettings.httpsPort(context), endpoint) {
+                WebListenSettings.saveBundledCaEnabled(context, true)
+                LanTls.clearCustom(context)
+            }
+        }.getOrElse { it.userMessage(context) }
 
     private fun createTls(context: Context): LanTls.Endpoint {
         val config = TeslaHttpCompatibility.config(context)
@@ -718,7 +754,7 @@ internal object WebSession {
                 if (
                     server == null ||
                         !WebListenSettings.httpsEnabled(context) ||
-                        LanTls.hasCustom(context)
+                        !LanTls.generatesCertificates(context)
                 )
                     return
                 serverGeneration
@@ -732,7 +768,7 @@ internal object WebSession {
                         if (
                             serverGeneration != generation ||
                                 server == null ||
-                                LanTls.hasCustom(context) ||
+                                !LanTls.generatesCertificates(context) ||
                                 TeslaHttpCompatibility.config(context) != config ||
                                 WebListenSettings.hostname(context) != hostname ||
                                 !WebListenSettings.httpsEnabled(context)

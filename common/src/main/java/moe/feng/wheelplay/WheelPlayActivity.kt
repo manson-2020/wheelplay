@@ -8,6 +8,7 @@ import com.shilapi.xcertplay.projection.ProjectionSourceIds
 import com.shilapi.xcertplay.projection.projectionSessions
 import com.shilapi.xcertplay.projection.plugin.projectionPlugins
 import com.shilapi.xcertplay.projection.plugin.RemotePluginSession
+import com.shilapi.xcertplay.projection.plugin.InstalledProjectionPlugin
 import com.shilapi.xcertplay.projection.ProjectionSession
 import moe.feng.wheelplay.plugin.ProjectionPlugin
 import com.shilapi.xcertplay.projection.registerProjectionSources
@@ -73,6 +74,7 @@ class WheelPlayActivity : AppCompatActivity() {
     private val settingsModel by lazy { ViewModelProvider(this)[SettingsViewModel::class.java] }
     private val settingsDialogs = SettingsDialogHost()
     private var webBusy = false
+    private var embeddedPlugin by mutableStateOf<InstalledProjectionPlugin?>(null)
     private var awaitingTeslaVpnConsent = false
     private val localAndroidAutoSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (!isFinishing && !isDestroyed) showLocalAndroidAutoSetup()
@@ -86,6 +88,7 @@ class WheelPlayActivity : AppCompatActivity() {
         }
     }
     private var pendingPemCertificate: ByteArray? = null
+    private var importingSigningCa = false
     private val pemCertificatePicker = registerForActivityResult(CertificateDocument()) { uri ->
         if (uri != null) {
             webBusy = true
@@ -102,6 +105,8 @@ class WheelPlayActivity : AppCompatActivity() {
     }
     private val pemKeyPicker = registerForActivityResult(CertificateDocument()) { uri ->
         val certificate = pendingPemCertificate
+        val signingCa = importingSigningCa
+        importingSigningCa = false
         pendingPemCertificate = null
         if (uri == null || certificate == null) certificate?.fill(0)
         else textInput(getString(UiR.string.ui_pem_private_key_password_leave_blank_if_unencrypted), "", true, onCancel = { certificate.fill(0) }) { value ->
@@ -109,7 +114,10 @@ class WheelPlayActivity : AppCompatActivity() {
             configureWeb(getString(UiR.string.ui_https_certificate_imported_reconnect_your_browser)) {
                 try {
                     val key = readCertificateFile(uri)
-                    try { LanTls.preparePem(certificate, key, password).use { WebSession.installCertificate(this, it) } }
+                    try {
+                        if (signingCa) WebSession.installSigningCa(this, certificate, key, password)
+                        else LanTls.preparePem(certificate, key, password).use { WebSession.installCertificate(this, it) }
+                    }
                     finally { key.fill(0) }
                 } finally { certificate.fill(0); password.fill('\u0000') }
             }
@@ -325,6 +333,15 @@ class WheelPlayActivity : AppCompatActivity() {
         refreshSettings()
         setContent {
             WheelPlayScreen(page, aaConnection, uiState, settingsModel, settingsActions, settingsDialogs, dialogs, snackbar, ::dispatch)
+            embeddedPlugin?.let { plugin -> key(plugin) {
+                PluginSettingsDialog(plugin, lifecycle, onDismiss = { embeddedPlugin = null },
+                    onExternal = plugin.settings?.let { component -> {
+                        embeddedPlugin = null
+                        if (projectionPlugins(this).entries().contains(plugin))
+                            runCatching { startActivity(Intent().setComponent(component)) }
+                                .onFailure { toast(getString(UiR.string.plugin_unavailable)) }
+                    } })
+            } }
         }
     }
 
@@ -387,9 +404,10 @@ class WheelPlayActivity : AppCompatActivity() {
                         refreshUiState()
                     }
                     UiAction.PLUGIN_DISABLE -> { registry.setEnabled(plugin, false); refreshUiState() }
-                    UiAction.PLUGIN_SETTINGS -> plugin.settings?.let { component ->
-                        runCatching { startActivity(Intent().setComponent(component)) }.onFailure { toast(getString(UiR.string.plugin_unavailable)) }
-                    }
+                    UiAction.PLUGIN_SETTINGS -> if (plugin.settingsProvider != null) embeddedPlugin = plugin
+                        else plugin.settings?.let { component ->
+                            runCatching { startActivity(Intent().setComponent(component)) }.onFailure { toast(getString(UiR.string.plugin_unavailable)) }
+                        }
                     UiAction.PLUGIN_CONNECT -> startProjectionSource(plugin.id)
                     else -> Unit
                 }
@@ -476,7 +494,8 @@ class WheelPlayActivity : AppCompatActivity() {
         val plugins = registry.entries().map { plugin -> PluginUi(
             plugin.id, plugin.name, plugin.component.packageName, plugin.sourceId == ProjectionPlugin.SOURCE_ICCOA_CARLINK,
             registry.enabled(plugin), plugin.problem, registry.lastFailure(plugin.id)?.let { getString(UiR.string.projection_failed, it) },
-            plugin.settings != null, !(running && (state.source?.id == plugin.id || active?.descriptor?.id == plugin.id)),
+            plugin.settings != null || plugin.settingsProvider != null,
+            !(running && (state.source?.id == plugin.id || active?.descriptor?.id == plugin.id)),
         ) }
         val addresses = if (WebSession.running && WebSession.error == null) WebSession.addresses(this) else emptyList()
         val primary = addresses.firstOrNull()
@@ -644,7 +663,10 @@ class WheelPlayActivity : AppCompatActivity() {
             SettingsCommand.SELECT_ICON -> oemImagePicker.launch("image/*")
             SettingsCommand.IMPORT_APK -> if (canImportAuthentication()) launchAuthenticationPicker { selectAuthenticationApk.launch(arrayOf("*/*")) }
             SettingsCommand.IMPORT_FILES -> if (canImportAuthentication()) launchAuthenticationPicker { selectAuthenticationKey.launch(arrayOf("*/*")) }
-            SettingsCommand.SELECT_PEM -> pemCertificatePicker.launch(arrayOf("*/*"))
+            SettingsCommand.SELECT_PEM, SettingsCommand.SELECT_SIGNING_CA -> {
+                importingSigningCa = command == SettingsCommand.SELECT_SIGNING_CA
+                pemCertificatePicker.launch(arrayOf("*/*"))
+            }
             SettingsCommand.SELECT_PKCS12 -> pkcs12Picker.launch(arrayOf("*/*"))
             SettingsCommand.APP_PERMISSIONS -> openSystem(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
             SettingsCommand.BLUETOOTH_SETTINGS -> openSystem(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))

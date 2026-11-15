@@ -388,11 +388,11 @@
     <string name="web_settings_close">关闭</string>
     <string name="web_paired_ready_to_start">已配对 · 等待启动</string>
     <string name="web_pair_start_display">配对并启动显示</string>
-    <string name="web_paired_choose_the_options_above_then_tap_start_display">已配对。选择上方选项后，点击「启动显示」。</string>
+    <string name="web_paired_choose_the_options_above_then_tap_start_display">已配对。确认设置后，点击「启动显示」。</string>
     <string name="web_paired_for_this_session_but_the_device_could_not">本次配对成功，但未能记住设备。下次可能需要重新配对；可检查浏览器存储或 App 中的设备数量。</string>
     <string name="web_paired_for_this_session_this_browser_cannot_remember_the">本次配对成功。浏览器无法保存设备，下次仍需配对。</string>
     <string name="web_restoring_pairing">正在恢复配对…</string>
-    <string name="web_pairing_restored_automatically_choose_the_options_above_then_tap">已自动恢复配对。选择上方选项后，点击「启动显示」。</string>
+    <string name="web_pairing_restored_automatically_choose_the_options_above_then_tap">已自动恢复配对。确认设置后，点击「启动显示」。</string>
     <string name="web_remembered_device_expired_or_removed_pair_again">设备记忆已失效或已被移除，请重新配对。</string>
     <string name="web_remembered_browser">已记住的浏览器</string>
     <string name="web_waiting_to_restore_pairing">等待恢复配对</string>
@@ -451,6 +451,11 @@
     <string name="web_auto_full_screen_help">每次打开网页自动进入全屏；若浏览器要求先点击，则在首次点击界面后自动进入。下方按钮只切换本次全屏。</string>
     <string name="web_enter_debug_mode">进入调试模式</string>
     <string name="web_exit_debug_mode">退出调试模式</string>
+    <string name="web_hide_top_bar_after_connecting">连接后隐藏顶部栏</string>
+    <string name="web_let_carplay_fill_the_page_refresh_to_return_to">让 CarPlay 画面占满整个页面；刷新页面可返回连接界面。</string>
+    <string name="web_hide_top_bar_enter_full_screen_on_start">启动后隐藏顶栏并全屏</string>
+    <string name="web_enter_full_screen_when_starting_and_hide_the_top">点击启动时进入全屏，连接后隐藏顶栏；退出全屏可恢复顶栏。不支持全屏时仅隐藏顶栏，刷新页面可返回连接界面。</string>
+
     <string name="web_display_video_with_canvas_experimental">使用 Canvas 显示视频（实验性）</string>
     <string name="web_decode_video_offscreen_then_draw_it_on_a_canvas">视频在屏幕外解码，再绘制到画布；适用于视频元素显示异常的浏览器。可能增加耗电，本浏览器会记住选择。</string>
     <string name="web_browser_microphone_requires_https">浏览器麦克风需要 HTTPS</string>
@@ -458,7 +463,7 @@
     <string name="web_loading">正在读取…</string>
     <string name="web_download_local_certificate">下载本地证书</string>
     <string name="web_open_https_page">打开 HTTPS 页面</string>
-    <string name="web_pairing_restored_choose_the_options_above_then_tap_start">已恢复配对。选择上方选项后，点击「启动显示」。</string>
+    <string name="web_pairing_restored_choose_the_options_above_then_tap_start">已恢复配对。确认设置后，点击「启动显示」。</string>
     <string name="web_head_unit_pairing_qr_code">车机配对二维码</string>
     <string name="web_scan_to_connect_the_head_unit">扫码连接车机</string>
     <string name="web_refresh_qr_code">刷新二维码</string>
@@ -637,6 +642,26 @@
     <string name="projection_state_connecting">正在连接输入源…</string>
     <string name="projection_state_running">输入源已就绪</string>
     <string name="projection_state_stopping">正在释放输入源资源…</string>
+    <string name="web_debug_title">调试信息</string>
+    <string name="web_debug_help">在右上角显示连接、帧率和延迟指标。</string>
+    <string name="web_debug_connection">连接状态</string>
+    <string name="web_debug_endpoint">服务地址</string>
+    <string name="web_debug_video">画面</string>
+    <string name="web_debug_image_fps">图像呈现帧率</string>
+    <string name="web_debug_rtc_fps">帧率 · 接收 / 解码 / 呈现</string>
+    <string name="web_debug_rtt">WebRTC 往返延迟</string>
+    <string name="web_debug_image_ack">图像确认耗时 · 含解码</string>
+    <string name="web_debug_decode">浏览器解码耗时</string>
+    <string name="web_debug_buffer">抖动缓冲耗时</string>
+    <string name="web_debug_note">延迟为各阶段测量值。— 表示暂不可用。</string>
+    <string name="web_debug_frames">已呈现帧数</string>
+    <string name="web_debug_image_decode">图像收帧至呈现</string>
+    <string name="web_debug_format">画面格式</string>
+    <string name="web_keypad_title">数字键盘</string>
+    <string name="web_keypad_done">收起</string>
+    <string name="web_keypad_clear">清空</string>
+    <string name="web_keypad_delete">删除上一位</string>
+    <string name="web_pairing_code_incomplete">请完整输入六位配对码。</string>
     <string name="ui_crop_title">裁剪车厂图标</string>
     <string name="ui_crop_format">正方形 · 1024 × 1024</string>
     <string name="ui_crop_zoom">缩放</string>
@@ -655,4 +680,6 @@
     <string name="carplay_connection_settings">连接设置</string>
     <string name="carplay_connection_stopping">正在取消连接</string>
     <string name="carplay_connection_stopping_hint">正在释放连接资源，请稍候。</string>
+    <string name="web_canvas_webgl_title">Canvas 使用 WebGL（实验性）</string>
+    <string name="web_canvas_webgl_help">默认关闭。适用于两种 Canvas 模式，下次连接生效。性能因设备而异，播放效果变差时请关闭。</string>
 </resources>

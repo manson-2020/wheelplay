@@ -56,6 +56,10 @@ internal class LanWebServer(
         viewer?.frameAvailable()
     }
 
+    fun requestSettings() {
+        viewer?.requestSettings()
+    }
+
     fun disconnectViewer() {
         viewer?.disconnect(context.getString(UiR.string.ui_device_removed))
     }
@@ -155,6 +159,8 @@ internal class LanWebServer(
                         .put("fingerprint", WebSession.tls?.fingerprint)
                         .put("port", WebSession.httpsPortFor(context, session.headers["host"]))
                         .put("customCertificate", WebSession.tls?.custom == true)
+                        .put("signingCa", WebSession.tls?.signingCa == true)
+                        .put("bundledCa", WebSession.tls?.bundledCa == true)
                         .put("enabled", WebListenSettings.httpsEnabled(context))
                         .put("error", WebSession.tlsError)
                         .toString(),
@@ -185,6 +191,9 @@ internal class LanWebServer(
                 "/text.js" -> "text.js" to "text/javascript; charset=utf-8"
                 "/app.js" -> "app.js" to "text/javascript; charset=utf-8"
                 "/url-flags.js" -> "url-flags.js" to "text/javascript; charset=utf-8"
+                "/pairing-keypad.js" -> "pairing-keypad.js" to "text/javascript; charset=utf-8"
+                "/debug-stats.js" -> "debug-stats.js" to "text/javascript; charset=utf-8"
+                "/canvas-frame-painter.js" -> "canvas-frame-painter.js" to "text/javascript; charset=utf-8"
                 "/viewport.js" -> "viewport.js" to "text/javascript; charset=utf-8"
                 "/presentation.js" -> "presentation.js" to "text/javascript; charset=utf-8"
                 "/media-probes.js" -> "media-probes.js" to "text/javascript; charset=utf-8"
@@ -448,6 +457,11 @@ internal class LanWebServer(
         }
 
         fun authorized() = token == null || pairing.authorized(token)
+
+        fun requestSettings() {
+            if (ended.get() || closing.get() || viewer !== this || !authorized()) return
+            reply(WebStreamSender.Control.SETTINGS, JSONObject().put("type", "open-settings").toString())
+        }
 
         @Volatile var lastSeen = SystemClock.elapsedRealtime()
 

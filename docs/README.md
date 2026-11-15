@@ -11,11 +11,13 @@
 - [VNC 远程桌面](VNC.md)：连接方法、RFB 协议范围、通用桌面输入和设备验收。
 - [Android 虚拟桌面](ANDROID_DESKTOP.md)：Shizuku 安装授权、本机应用选择、图像/触控链路、生命周期及尚未完成的真机验收。
 - [APK 输入源插件](PROJECTION_PLUGINS.md)：安装启用、独立 SDK/示例 APK、Surface 与触控协议，以及 ICCOA 插件接入边界。
+- [插件内嵌设置](PLUGIN_SETTINGS.md)：ContentProvider schema、Jetpack Remote Compose、宿主内呈现与插件配置读写。
 - [投影输入源实现与设备验收](PROJECTION_IMPLEMENTATION.md)：当前框架、CarPlay 适配、三类诊断源及后续协议接入范围。
 - [通用输入源框架设计草案](INPUT_SOURCE_FRAMEWORK.md)：CarPlay、Android Auto、ICCOA、桌面与 VNC 的接口边界、研究证据及分阶段迁移建议（研究时点的方案）。
 - [WebRTC 稳定性与卡顿恢复](WEBRTC_RECOVERY.md)：回退原因、可配置容忍时间及真机排查方法。
 - [认证资源导入](AUTHENTICATION_IMPORT.md)：手动选择资源、从用户下载的 DiPlay APK 提取及本地存储。
 - [Tesla HTTP 兼容模式](TESLA_HTTP.md)：无证书虚拟地址入口、可选域名和实机验证限制。
+- [eMudhra CA 的 HTTPS 签发框架](HTTPS_SIGNING_CA.md)：编译内置、CA 证书链与私钥导入、按访问地址签发及 HTTPS 监听更新。
 - [验证记录](VALIDATION.md)：已通过的检查、APK 校验值和未完成的真机验证。
 - [组件间距检查](SPACING_REVIEW.md)：本轮发现、尺寸约定、修正和验证范围。
 - [上游来源](UPSTREAM.md)：原版提交及本分支改动范围。

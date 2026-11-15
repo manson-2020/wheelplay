@@ -141,12 +141,27 @@
     <string name="settings_https">Enable HTTPS</string>
     <string name="settings_https_description">Provide HTTPS access for browsers. Browser microphones require a trusted certificate.</string>
     <string name="settings_certificate_type">Certificate type</string>
+    <string name="settings_emudhra_ca">eMudhra CA signing (manual import)</string>
+    <string name="settings_bundled_ca">Built-in eMudhra CA</string>
+    <string name="settings_bundled_ca_description">Use the CA key and certificate chain included when this app was built. Server certificates follow the current IP addresses and Web hostname.</string>
+    <string name="settings_certificate_bundled_ca">Using the built-in signing CA</string>
+    <string name="settings_bundled_ca_applied">Built-in CA applied; reconnect your browser</string>
+    <string name="settings_bundled_ca_save_failed">Could not save the built-in CA setting</string>
+    <string name="settings_select_signing_ca">Choose CA chain &amp; private key</string>
+    <string name="settings_signing_ca_description">Select the signing CA and its ordered issuer chain, then its PEM private key. WheelPlay signs a server certificate for the current IP addresses and Web hostname.</string>
+    <string name="settings_certificate_signing_ca">Using an imported signing CA</string>
+    <string name="settings_ca_chain_required">A signing CA certificate chain is required</string>
+    <string name="settings_ca_constraints_invalid">Every issuer must be a CA with certificate signing permission and sufficient path length</string>
+    <string name="settings_ca_server_use_required">The CA chain does not permit TLS server certificates</string>
+    <string name="settings_ca_chain_order">Order the chain from the signing CA to its issuers; supply one certificate path</string>
+    <string name="settings_ca_key_mismatch">The signing CA certificate and private key do not match</string>
     <string name="settings_select_pem">Choose PEM certificate &amp; private key</string>
     <string name="settings_select_pkcs12">Choose PKCS#12 file</string>
     <string name="settings_certificate_custom">Using a custom certificate</string>
     <string name="settings_certificate_default">Using the default local certificate</string>
     <string name="settings_certificate_builtin">Using the bundled HTTPS certificate; upload your own to replace it.</string>
     <string name="settings_certificate_description">Certificates and keys are stored privately in the app. For PEM, select the certificate chain, then the private key. PKCS#12 supports selecting a private-key entry.</string>
+
     <string name="settings_connection_mode">Connection method</string>
     <string name="settings_routing_proxy_description">Some head-unit browsers block private network addresses. The routing proxy exposes the same web service under a second access address so those browsers can reach local services on this phone. Tesla and other head units with the same restriction can try it.</string>
     <string name="settings_enable_vpn">Enable rootless routing proxy</string>
@@ -221,4 +236,17 @@
     <string name="settings_safe_area_increase">Increase %1$s by 1%%</string>
     <string name="settings_safe_area_decrease">Decrease %1$s by 1%%</string>
     <string name="settings_safe_area_slot">Resolution: %1$d × %2$d · Saved separately</string>
+    <string name="plugin_settings_busy">Settings are busy; try again</string>
+    <string name="plugin_settings_conflict">Settings changed elsewhere. The latest values have been loaded.</string>
+    <string name="plugin_settings_timeout">The plugin did not respond. Retry or open its separate settings page.</string>
+    <string name="plugin_settings_changed">The plugin was updated or removed. Close this page and reopen settings.</string>
+    <string name="plugin_settings_close">Close</string>
+    <string name="plugin_settings_external">Open in plugin</string>
+    <string name="plugin_settings_retry">Retry</string>
+    <string name="plugin_settings_schema">Standard settings</string>
+    <string name="plugin_settings_remote">Plugin layout</string>
+    <string name="plugin_settings_run">Run</string>
+    <string name="plugin_settings_edit">Edit</string>
+    <string name="plugin_settings_reconnect">Applies on the next connection</string>
+    <string name="plugin_settings_save">Save</string>
 </resources>

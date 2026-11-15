@@ -141,12 +141,27 @@
     <string name="settings_https">启用 HTTPS</string>
     <string name="settings_https_description">为浏览器提供 HTTPS 访问；浏览器麦克风需要可信证书。</string>
     <string name="settings_certificate_type">证书类型</string>
+    <string name="settings_emudhra_ca">eMudhra CA 签发（手动导入）</string>
+    <string name="settings_bundled_ca">内置 eMudhra CA</string>
+    <string name="settings_bundled_ca_description">使用编译时内置的 CA 私钥和证书链，按当前 IP 与 Web 域名签发服务器证书。</string>
+    <string name="settings_certificate_bundled_ca">当前使用内置 CA 动态签发</string>
+    <string name="settings_bundled_ca_applied">已应用内置 CA，请重新连接浏览器</string>
+    <string name="settings_bundled_ca_save_failed">无法保存内置 CA 设置</string>
+    <string name="settings_select_signing_ca">选择 CA 证书链与私钥</string>
+    <string name="settings_signing_ca_description">依次选择签发 CA 及其上级证书链、PEM 私钥。WheelPlay 按当前 IP 与 Web 域名签发服务器证书。</string>
+    <string name="settings_certificate_signing_ca">当前使用导入的 CA 动态签发</string>
+    <string name="settings_ca_chain_required">需要提供签发 CA 证书链</string>
+    <string name="settings_ca_constraints_invalid">各级签发者必须是具有证书签发权限且路径长度足够的 CA</string>
+    <string name="settings_ca_server_use_required">CA 证书链不允许签发 TLS 服务器证书</string>
+    <string name="settings_ca_chain_order">证书链须从签发 CA 到上级依次排列，只提供一条证书路径</string>
+    <string name="settings_ca_key_mismatch">签发 CA 证书与私钥不匹配</string>
     <string name="settings_select_pem">选择 PEM 证书与私钥</string>
     <string name="settings_select_pkcs12">选择 PKCS#12 文件</string>
     <string name="settings_certificate_custom">当前使用自定义证书</string>
     <string name="settings_certificate_default">当前使用默认本地证书</string>
     <string name="settings_certificate_builtin">当前使用内置 HTTPS 证书，可上传自己的证书替换。</string>
     <string name="settings_certificate_description">证书和私钥保存在 App 私有存储。PEM 依次选择证书链、私钥；PKCS#12 可选择私钥条目。</string>
+
     <string name="settings_connection_mode">连接方案</string>
     <string name="settings_routing_proxy_description">部分车机浏览器会拦截私有网段的访问地址。路由代理在同一个 Web 服务上再提供一个访问入口，让这类浏览器连到手机上的本地服务；Tesla 及其他有同类限制的车机都可尝试。</string>
     <string name="settings_enable_vpn">启用免 Root 路由代理</string>
@@ -221,4 +236,17 @@
     <string name="settings_safe_area_increase">%1$s增加 1%%</string>
     <string name="settings_safe_area_decrease">%1$s减少 1%%</string>
     <string name="settings_safe_area_slot">分辨率：%1$d × %2$d · 独立保存</string>
+    <string name="plugin_settings_busy">设置正在更新，请稍后重试</string>
+    <string name="plugin_settings_conflict">设置已在其他位置修改，已载入最新值。</string>
+    <string name="plugin_settings_timeout">插件未响应，请重试或打开插件独立设置页。</string>
+    <string name="plugin_settings_changed">插件已更新或移除，请关闭此页并重新打开设置。</string>
+    <string name="plugin_settings_close">关闭</string>
+    <string name="plugin_settings_external">在插件中打开</string>
+    <string name="plugin_settings_retry">重试</string>
+    <string name="plugin_settings_schema">标准设置</string>
+    <string name="plugin_settings_remote">插件布局</string>
+    <string name="plugin_settings_run">执行</string>
+    <string name="plugin_settings_edit">修改</string>
+    <string name="plugin_settings_reconnect">下次连接时生效</string>
+    <string name="plugin_settings_save">保存</string>
 </resources>

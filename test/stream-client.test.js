@@ -5,21 +5,26 @@ import vm from 'node:vm';
 import { resourceStrings } from '../scripts/resource-strings.mjs';
 const messages = resourceStrings('values-zh-rCN');
 
-const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'viewport.js', 'presentation.js', 'media-probes.js', 'jpeg-presenter.js', 'control-outbox.js', 'browser-appearance.js', 'video-renderer.js', 'rtc-receiver.js', 'codec-stream.js', 'url-flags.js', 'app.js']
+const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'viewport.js', 'presentation.js', 'media-probes.js', 'jpeg-presenter.js', 'control-outbox.js', 'browser-appearance.js', 'video-renderer.js', 'rtc-receiver.js', 'codec-stream.js', 'url-flags.js', 'canvas-frame-painter.js', 'debug-stats.js', 'pairing-keypad.js', 'app.js']
   .map(name => readFileSync(new URL(`../common/src/main/assets/web/${name}`, import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replaceAll('export function', 'function').replaceAll('export const', 'const')).join('\n');
-function fixture({ storedCanvas = null, storedMode = null, processorAvailable = true, storedIgnoreZoom = null, storageDisabled = false, canvasAvailable = true, supportsWebp = false,
+function fixture({ storedCanvas = null, storedMode = null, storedWebgl = null, storedDebug = null, rtcStats = null,
+  processorAvailable = true, storedIgnoreZoom = null, storageDisabled = false, canvasAvailable = true, supportsWebp = false,
   geometry = null, visual = null, peerAvailable = true, search = '', mediaSession = null, locationBrowser = null,
   fullscreen = 'supported', fullscreenResults = null, autoFullscreen = false, codeDenied = false, videoDecoder = false,
   resume = () => ({ token: 'session-token', name: 'Chrome' }) } = {}) {
+  const contextRequests = [];
   const elements = new Map(), timers = new Map(), raf = new Map(), sockets = [], peers = [], draws = [];
   const preferences = new Map(storedCanvas === null ? [] : [['wheelplay.canvasVideo', storedCanvas]]);
   if (storedIgnoreZoom !== null) preferences.set('wheelplay.ignoreBrowserZoom', storedIgnoreZoom);
   if (autoFullscreen) preferences.set('wheelplay.fullscreenOnStart', 'true');
   const videoCallbacks = new Map(), createdVideos = [], processors = [];
   if (storedMode !== null) preferences.set('wheelplay.videoRenderer', storedMode);
+  if (storedWebgl !== null) preferences.set('wheelplay.canvasWebgl', storedWebgl);
+  if (storedDebug !== null) preferences.set('wheelplay.debugOverlay', storedDebug);
   const documentEvents = {}, documentListeners = {}, fullscreenCalls = [];
   const fireDocument = (name, event = {}) => (documentListeners[name] || []).forEach(fn => fn(event));
+
   const visualEvents = {};
   const visualViewport = visual ? { ...visual, addEventListener(type, fn) { visualEvents[type] = fn; } } : undefined;
   const mainRect = geometry ? { left: 0, top: geometry.top, width: geometry.width, height: geometry.height - geometry.top }
@@ -27,11 +32,15 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
   let nextTimer = 0, nextFrame = 0, clockNow = 1000;
   const element = id => {
     const classes = new Set();
-    if (!elements.has(id)) elements.set(id, { hidden: id === 'video-canvas' || id === 'disconnect', complete: true, value: '123456', handlers: {}, naturalWidth: 1280, naturalHeight: 720,
+    if (!elements.has(id)) elements.set(id, { hidden: ['video-canvas', 'video-canvas-webgl', 'disconnect'].includes(id), complete: true, value: '123456', handlers: {}, naturalWidth: 1280, naturalHeight: 720,
+
       checked: false, videoWidth: 1280, videoHeight: 720, readyState: 2, currentTime: 0,
       style: { removeProperty(name) { delete this[name]; } },
       parentElement: { getBoundingClientRect: () => mainRect },
-      getContext: () => canvasAvailable ? { drawImage: (...args) => draws.push(args) } : null,
+      getContext(type) {
+        contextRequests.push([id, type]);
+        return type === '2d' && canvasAvailable ? { drawImage: (...args) => draws.push(args) } : null;
+      },
       play: async () => {},
       requestVideoFrameCallback(fn) { const frame = ++nextFrame; videoCallbacks.set(frame, fn); return frame; },
       cancelVideoFrameCallback(frame) { videoCallbacks.delete(frame); },
@@ -40,6 +49,7 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
       insertBefore(child) { child.removed = false; },
       removeAttribute() {}, setAttribute() {}, setPointerCapture() {}, focus() {},
       closest(selector) { return selector === `#${id}` ? this : null; },
+
       getBoundingClientRect() {
         if (id !== 'display' || !classes.has('ignore-browser-zoom')) return mainRect;
         const scale = Number(this.style.transform.match(/scale\((.*)\)/)[1]);
@@ -56,7 +66,7 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
     close() { this.readyState = 3; this.onclose(); }
   }
   class Peer {
-    constructor() { this.iceGatheringState = 'complete'; this.localDescription = { sdp: 'answer' }; peers.push(this); }
+    constructor() { this.iceGatheringState = 'complete'; this.localDescription = { sdp: 'answer' }; if (rtcStats) this.getStats = rtcStats; peers.push(this); }
     async setRemoteDescription() {}
     async createAnswer() { return { type: 'answer', sdp: 'a=setup:active\r\n' }; }
     async setLocalDescription() {}
@@ -134,7 +144,7 @@ function fixture({ storedCanvas = null, storedMode = null, processorAvailable = 
   };
   context.wheelplayMessages = messages;
   vm.runInNewContext(source, context);
-  return { element, sockets, timers, peers, draws, preferences, raf, videoCallbacks, document, fullscreenCalls, createdVideos, processors, visualViewport, visualEvents,
+  return { element, sockets, timers, peers, draws, preferences, contextRequests, raf, videoCallbacks, document, fullscreenCalls, createdVideos, processors, visualViewport, visualEvents,
     reportViewport() {
       const [id, timer] = [...timers].find(([, t]) => t.delay === 180);
       timers.delete(id); timer.fn();
@@ -250,6 +260,7 @@ test('a plain visit leaves fullscreen alone and labels the button for entering',
 
 test('auto full screen asks once as the page loads, before pairing starts', async () => {
   const f = fixture({ autoFullscreen: true });
+
   assert.deepEqual(f.fullscreenCalls, ['request']);
   assert.equal(f.document.fullscreenElement, f.document.documentElement);
   assert.equal(f.element('fullscreen').textContent, messages.web_exit_full_screen);
@@ -261,6 +272,7 @@ test('a gesture-gated browser enters fullscreen on the first tap only', async ()
   const f = fixture({ autoFullscreen: true, fullscreenResults: ['denied', 'supported'] });
   await flush();
   assert.deepEqual(f.fullscreenCalls, ['request']);
+
   assert.equal(f.document.fullscreenElement, null);
   f.tapAnywhere();
   assert.deepEqual(f.fullscreenCalls, ['request', 'request']);
@@ -349,14 +361,17 @@ test('an unsupported or refusing browser still connects without a pending retry'
   for (const options of [{ fullscreen: 'unsupported' }, { fullscreen: 'denied' }]) {
     const f = fixture({ autoFullscreen: true, ...options });
     await flush();
+
     await f.connect();
     assert.equal(f.element('display').hidden, false);
     f.tapAnywhere();
     assert.equal(f.document.fullscreenElement, null);
     f.element('disconnect').handlers.click();
+
     assert.equal(f.fullscreenCalls.includes('exit'), false);
   }
 });
+
 
 test('actual image onload retries ACK and preserves down/up during browser congestion', async () => {
   const f = fixture(), ws = await f.connect();
@@ -412,6 +427,62 @@ test('default WebRTC presents native video without allocating a Canvas', async (
   assert.equal(f.element('video').classList.contains('offscreen-video'), false);
   assert.equal(f.element('video-canvas').hidden, true); assert.equal(f.draws.length, 0);
   assert.equal(ws.sent.at(-1).type, 'rtc-ready');
+});
+
+test('WebGL defaults off and is available only for Canvas modes', async () => {
+  const f = fixture(), option = f.element('canvas-webgl');
+  assert.equal(option.checked, false); assert.equal(option.disabled, true);
+  f.select('video-canvas'); assert.equal(option.disabled, false);
+  f.select('track-canvas'); assert.equal(option.disabled, false);
+  const ws = await f.connect(); await f.offer(ws); await f.decoded();
+  assert.equal(f.element('video-canvas').hidden, false);
+  assert.equal(f.element('video-canvas-webgl').hidden, true);
+  assert.ok(f.contextRequests.every(([, type]) => type === '2d'));
+});
+
+test('WebGL preference is explicit, persists and safely defaults off when storage is denied', async () => {
+  for (const mode of ['video-canvas', 'track-canvas']) {
+    const f = fixture({ storedMode: mode, storedWebgl: 'true' });
+    assert.equal(f.element('canvas-webgl').checked, true);
+    const ws = await f.connect(); await f.offer(ws);
+    if (mode === 'track-canvas') await f.decoded();
+    assert.ok(f.contextRequests.some(([id, type]) => id === 'video-canvas-webgl' && type === 'webgl'));
+    assert.equal(f.element('video-canvas').hidden, true);
+    assert.equal(f.element('video-canvas-webgl').hidden, false); // Unsupported WebGL falls back to 2D.
+    const option = f.element('canvas-webgl'); option.checked = false; option.handlers.change();
+    assert.equal(f.preferences.get('wheelplay.canvasWebgl'), 'false');
+    option.checked = true; option.handlers.change(); assert.equal(f.preferences.get('wheelplay.canvasWebgl'), 'true');
+  }
+  assert.equal(fixture({ storedWebgl: 'invalid' }).element('canvas-webgl').checked, false);
+  const denied = fixture({ storedWebgl: 'true', storageDisabled: true });
+  assert.equal(denied.element('canvas-webgl').checked, false);
+  denied.element('canvas-webgl').checked = true; assert.doesNotThrow(() => denied.element('canvas-webgl').handlers.change());
+});
+
+test('a saved WebGL preference does not change native Video rendering', async () => {
+  const f = fixture({ storedWebgl: 'true' }), ws = await f.connect(); await f.offer(ws);
+  assert.equal(f.element('canvas-webgl').disabled, true);
+  assert.equal(f.createdVideos.length, 1); assert.equal(f.contextRequests.length, 0);
+  assert.equal(f.element('video-canvas-webgl').hidden, true);
+});
+
+test('changing WebGL takes effect at manual launch while reconnects keep the active selection', async () => {
+  const f = fixture({ storedMode: 'track-canvas' });
+  let ws = await f.connect(); await f.offer(ws); await f.decoded();
+  const cpu = f.element('video-canvas'), gpu = f.element('video-canvas-webgl'), option = f.element('canvas-webgl');
+  option.checked = true; option.handlers.change();
+  ws.close(); f.advance(1000); await new Promise(resolve => setImmediate(resolve));
+  ws = f.sockets.at(-1); ws.readyState = 1; ws.onopen(); await f.offer(ws); await f.decoded();
+  assert.equal(cpu.hidden, false); assert.equal(gpu.hidden, true);
+  assert.ok(f.contextRequests.every(([, type]) => type === '2d'));
+  f.element('disconnect').handlers.click();
+  ws = await f.connect(); await f.offer(ws); await f.decoded();
+  assert.equal(cpu.hidden, true); assert.equal(gpu.hidden, false);
+  f.element('disconnect').handlers.click(); option.checked = false; option.handlers.change();
+  ws = await f.connect(); await f.offer(ws); await f.decoded();
+  assert.equal(cpu.hidden, false); assert.equal(gpu.hidden, true);
+  f.pointer('pointerdown', 100, 'video-canvas'); f.pointer('pointerup', 100, 'video-canvas');
+  assert.equal(ws.sent.filter(message => message.type === 'touch').length, 2);
 });
 
 test('a recoverable WebRTC disconnect preserves video and touch and reports recovery', async () => {
@@ -660,7 +731,7 @@ test('automatic RTC retry preserves JPEG and touch until the new video frame is 
 test('a transient Canvas draw error permits a later retry to restore video', async () => {
   const f = fixture({ storedCanvas: 'true' }), ws = await f.connect(); mediaStatus(ws);
   const canvas = f.element('video-canvas'), getContext = canvas.getContext;
-  canvas.getContext = () => ({ drawImage() { throw new Error('temporary surface loss'); } });
+  canvas.getContext = type => type === '2d' ? { drawImage() { throw new Error('temporary surface loss'); } } : null;
   await f.offer(ws, 1, { sessionId: 7, videoEpoch: 1 });
   assert.equal(ws.sent.at(-1).type, 'rtc-fallback');
   assert.notEqual(ws.sent.at(-1).retryable, false);
@@ -905,7 +976,7 @@ test('Direct Canvas failures freeze the last frame until the fallback image is d
     const f = fixture({ storedMode: 'track-canvas' }), ws = await f.connect();
     const canvas = f.element('video-canvas'), held = f.element('held-frame');
     let failDraw = false, copied = false;
-    canvas.getContext = () => ({ drawImage() { if (failDraw) throw new Error('draw failed'); } });
+    canvas.getContext = type => type === '2d' ? { drawImage() { if (failDraw) throw new Error('draw failed'); } } : null;
     held.getContext = () => ({ drawImage(source) {
       assert.equal(source, canvas); assert.equal(source.hidden, false);
       assert.equal(source.width, 1280); assert.equal(source.height, 720);

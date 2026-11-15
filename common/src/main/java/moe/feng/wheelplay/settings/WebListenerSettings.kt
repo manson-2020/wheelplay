@@ -62,7 +62,9 @@ internal fun WebListenerSettings(state: SettingsState, actions: SettingsActions)
             settingsString(R.string.settings_certificate_type),
             style = MaterialTheme.typography.titleMedium,
         )
-        WebListenSettings.CertificateType.entries.forEach { type ->
+        WebListenSettings.CertificateType.entries.filter {
+            it != WebListenSettings.CertificateType.BUNDLED_CA || state.bundledCaAvailable
+        }.forEach { type ->
             Row(
                 Modifier.fillMaxWidth()
                     .testTag("certificate:${type.name}")
@@ -82,6 +84,8 @@ internal fun WebListenerSettings(state: SettingsState, actions: SettingsActions)
         }
         when (state.certificateType) {
             WebListenSettings.CertificateType.DEFAULT -> Unit
+            WebListenSettings.CertificateType.BUNDLED_CA ->
+                SettingsDescription(R.string.settings_bundled_ca_description)
             WebListenSettings.CertificateType.PEM ->
                 SettingsButton(R.string.settings_select_pem, enabled) {
                     actions.command(SettingsCommand.SELECT_PEM)
@@ -90,11 +94,19 @@ internal fun WebListenerSettings(state: SettingsState, actions: SettingsActions)
                 SettingsButton(R.string.settings_select_pkcs12, enabled) {
                     actions.command(SettingsCommand.SELECT_PKCS12)
                 }
+            WebListenSettings.CertificateType.EMUDHRA_CA -> {
+                SettingsButton(R.string.settings_select_signing_ca, enabled) {
+                    actions.command(SettingsCommand.SELECT_SIGNING_CA)
+                }
+                SettingsDescription(R.string.settings_signing_ca_description)
+            }
         }
         SettingsDescription(
             when {
-                state.customCertificate -> R.string.settings_certificate_custom
+                state.signingCa -> R.string.settings_certificate_signing_ca
+                state.bundledCertificate && state.bundledCaAvailable -> R.string.settings_certificate_bundled_ca
                 state.bundledCertificate -> R.string.settings_certificate_builtin
+                state.customCertificate -> R.string.settings_certificate_custom
                 else -> R.string.settings_certificate_default
             }
         )

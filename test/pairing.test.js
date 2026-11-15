@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { resourceStrings } from '../scripts/resource-strings.mjs';
 const messages = resourceStrings('values-zh-rCN');
 
-const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'viewport.js', 'presentation.js', 'media-probes.js', 'jpeg-presenter.js', 'control-outbox.js', 'browser-appearance.js', 'video-renderer.js', 'rtc-receiver.js', 'codec-stream.js', 'url-flags.js', 'app.js']
+const source = ['text.js', 'desktop-input.js', 'browser-audio.js', 'browser-location.js', 'browser-media-session.js', 'phone-gauge.js', 'viewport.js', 'presentation.js', 'media-probes.js', 'jpeg-presenter.js', 'control-outbox.js', 'browser-appearance.js', 'video-renderer.js', 'rtc-receiver.js', 'codec-stream.js', 'url-flags.js', 'canvas-frame-painter.js', 'debug-stats.js', 'pairing-keypad.js', 'app.js']
   .map(name => readFileSync(new URL(`../common/src/main/assets/web/${name}`, import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replaceAll('export function', 'function').replaceAll('export const', 'const')).join('\n');
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -50,7 +50,8 @@ function fixture({ status = () => ok({ state: 'pending' }), stored = null,
         setItem(key, value) { if (storageDisabled) throw new Error('denied'); preferences.set(key, value); },
         removeItem(key) { preferences.delete(key); },
       },
-    }, location: { host: 'server:8080', href, search }, URL, Date, WebSocket: Socket,
+    }, location: { host: 'server:8080', href, search }, URL, Date, performance: { now: () => 0 }, WebSocket: Socket,
+
     setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
     clearTimeout(id) { timers.delete(id); }, clearInterval() {},
     fetch: async (url, options) => {
@@ -122,6 +123,7 @@ test('?manual=1 QR approval remembers the browser and waits for the explicit lau
   assert.deepEqual(JSON.parse(f.preferences.get('wheelplay.browserDevice')), savedDevice);
   f.element('renderer-video-canvas').checked = true;
   f.submit(); await settle();
+
   assert.equal(f.sockets.length, 1);
   assert.equal(f.sockets[0].url, 'ws://server:8080/stream?token=resumed-token&media=2&images=3&nowPlaying=1');
   assert.equal(f.element('renderer-video-canvas').checked, true);

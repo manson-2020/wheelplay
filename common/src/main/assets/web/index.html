@@ -12,17 +12,24 @@
 <body>
 <!-- No top bar: connection status and its actions live in the settings drawer, and the
      pairing page keeps a single Settings entry so the drawer is reachable before connecting. -->
-<main>
+<main id="main-content">
 <section id="pairing" aria-labelledby="title">
 <div class="eyebrow">{{web_local_network_head_unit_display}}</div>
 <h1 id="title">{{web_connect_your_carplay_display}}</h1>
 <p id="pair-instructions" hidden>{{web_for_the_first_connection_tap_scan_qr_code_to}}<br class="wide">{{web_then_scan_the_qr_code_below_and_allow_the}}</p>
 <div id="remembered-device" role="status" hidden><strong id="device-name"></strong><p id="device-status">{{web_pairing_restored_choose_the_options_above_then_tap_start}}</p></div>
 <div class="qr-pairing" id="qr-pairing" hidden><img id="pair-qr" width="240" height="240" alt="{{web_head_unit_pairing_qr_code}}" hidden><div><h2>{{web_scan_to_connect_the_head_unit}}</h2><p id="qr-status" role="status" aria-live="polite">{{web_generating_qr_code}}</p><button id="refresh-qr" type="button">{{web_refresh_qr_code}}</button></div></div>
-<form id="connect-form" hidden><div id="code-entry"><p class="hint">{{web_you_can_also_enter_the_pairing_code}}</p><label for="code">{{web_six_digit_pairing_code_on_the_device}}</label><input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" placeholder="{{web_enter_pairing_code}}" required></div><button class="primary" id="connect" type="submit"><span id="connect-label">{{web_pair_start_display}}</span> <!-- Google Material Icons: arrow_forward, Apache-2.0; docs/UPSTREAM.md. --><svg class="material-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg></button></form>
+<form id="connect-form" hidden><div id="code-entry"><p class="hint">{{web_you_can_also_enter_the_pairing_code}}</p><div class="pin-inputs" id="pin-inputs"><input id="code-digit-1" class="pin-digit" type="text" inputmode="none" readonly aria-controls="pairing-keypad" aria-expanded="false" pattern="[0-9]" maxlength="6" autocomplete="one-time-code" aria-label="{{web_six_digit_pairing_code_on_the_device}} · 1 / 6" required>
+<input id="code-digit-2" class="pin-digit" type="text" inputmode="none" readonly aria-controls="pairing-keypad" aria-expanded="false" pattern="[0-9]" maxlength="6" autocomplete="off" aria-label="{{web_six_digit_pairing_code_on_the_device}} · 2 / 6" required>
+<input id="code-digit-3" class="pin-digit" type="text" inputmode="none" readonly aria-controls="pairing-keypad" aria-expanded="false" pattern="[0-9]" maxlength="6" autocomplete="off" aria-label="{{web_six_digit_pairing_code_on_the_device}} · 3 / 6" required>
+<input id="code-digit-4" class="pin-digit" type="text" inputmode="none" readonly aria-controls="pairing-keypad" aria-expanded="false" pattern="[0-9]" maxlength="6" autocomplete="off" aria-label="{{web_six_digit_pairing_code_on_the_device}} · 4 / 6" required>
+<input id="code-digit-5" class="pin-digit" type="text" inputmode="none" readonly aria-controls="pairing-keypad" aria-expanded="false" pattern="[0-9]" maxlength="6" autocomplete="off" aria-label="{{web_six_digit_pairing_code_on_the_device}} · 5 / 6" required>
+<input id="code-digit-6" class="pin-digit" type="text" inputmode="none" readonly aria-controls="pairing-keypad" aria-expanded="false" pattern="[0-9]" maxlength="6" autocomplete="off" aria-label="{{web_six_digit_pairing_code_on_the_device}} · 6 / 6" required></div>
+<input id="code" name="code" type="hidden"></div><button class="primary" id="connect" type="submit"><span id="connect-label">{{web_pair_start_display}}</span> <!-- Google Material Icons: arrow_forward, Apache-2.0; docs/UPSTREAM.md. --><svg class="material-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg></button></form>
 <p id="message" role="alert"></p>
 <div class="pairing-settings"><button id="settings-toggle" type="button">{{ui_settings}}</button></div>
 <footer>{{web_connect_the_device_and_head_unit_to_the_same}}<br>{{web_audio_and_microphone_use_android_by_default_enable_browser}}</footer>
+<div id="keypad-scroll-space" hidden aria-hidden="true"></div>
 </section>
 <section id="display" hidden aria-label="{{web_carplay_display}}">
 <img id="screen" alt="{{web_live_carplay_display}}" draggable="false" hidden>
@@ -32,6 +39,8 @@
 <div id="media-message" role="status" aria-live="polite" hidden></div>
 <div id="phone-status" aria-hidden="true" hidden></div>
 <canvas id="video-canvas" width="0" height="0" aria-label="{{web_live_carplay_video_canvas}}" hidden></canvas>
+<!-- Context types cannot change on a canvas: the opt-in WebGL backend owns its own surface. -->
+<canvas id="video-canvas-webgl" width="0" height="0" aria-label="{{web_live_carplay_video_canvas}}" hidden></canvas>
 <button id="desktop-back" type="button" hidden>{{web_desktop_back}}</button>
 <div id="touch-surface" aria-hidden="true"></div>
 <div id="location-message" hidden role="status" aria-live="polite"></div>
@@ -51,6 +60,7 @@
 <label id="renderer-video-canvas-card" class="renderer-card" for="renderer-video-canvas"><input id="renderer-video-canvas" type="radio" name="video-renderer" value="video-canvas"><span><strong>{{web_video_renderer_compat}}</strong><em>{{web_video_renderer_experimental}}</em><small>{{web_video_renderer_compat_description}}</small></span></label>
 <label id="renderer-track-canvas-card" class="renderer-card" for="renderer-track-canvas"><input id="renderer-track-canvas" type="radio" name="video-renderer" value="track-canvas"><span><strong>{{web_video_renderer_direct}}</strong><em>{{web_video_renderer_experimental}}</em><small>{{web_video_renderer_direct_description}}</small></span></label>
 </div><p id="renderer-hint" class="renderer-hint" role="status" hidden>{{web_video_renderer_hint}}</p></fieldset>
+<label class="launch-option" for="canvas-webgl"><input id="canvas-webgl" type="checkbox" autocomplete="off" disabled aria-describedby="canvas-webgl-help"><i class="check-box" aria-hidden="true"></i><span><strong>{{web_canvas_webgl_title}}</strong><small id="canvas-webgl-help">{{web_canvas_webgl_help}}</small></span></label>
 <label class="launch-option" for="ignore-browser-zoom"><input id="ignore-browser-zoom" type="checkbox"><i class="check-box" aria-hidden="true"></i><span><strong>{{web_ignore_browser_zoom}}</strong><small>{{web_ignore_browser_zoom_help}}</small></span></label>
 <label class="launch-option" for="browser-location"><input id="browser-location" type="checkbox" autocomplete="off" aria-describedby="location-status"><i class="check-box" aria-hidden="true"></i><span><strong>{{web_location_title}}</strong><small>{{web_location_help}}</small></span></label>
 <p id="location-status" class="hint" role="status" aria-live="polite"></p>
@@ -58,6 +68,21 @@
 </div>
 <div class="drawer-foot"><button id="fullscreen" type="button">{{web_full_screen}}</button><button id="disconnect" type="button" hidden>{{web_disconnect}}</button><button id="diag-toggle" type="button">{{web_enter_debug_mode}}</button></div>
 </aside>
+<div id="pairing-keypad" popover="manual" role="dialog" aria-modal="false" aria-labelledby="keypad-title" hidden>
+<div class="keypad-heading"><strong id="keypad-title">{{web_keypad_title}}</strong><output id="keypad-code" aria-label="{{web_six_digit_pairing_code_on_the_device}}">· · · · · ·</output><button id="keypad-done" type="button">{{web_keypad_done}}</button></div>
+<div class="keypad-keys">
+<button id="keypad-1" type="button">1</button>
+<button id="keypad-2" type="button">2</button>
+<button id="keypad-3" type="button">3</button>
+<button id="keypad-4" type="button">4</button>
+<button id="keypad-5" type="button">5</button>
+<button id="keypad-6" type="button">6</button>
+<button id="keypad-7" type="button">7</button>
+<button id="keypad-8" type="button">8</button>
+<button id="keypad-9" type="button">9</button>
+<button id="keypad-clear" type="button">{{web_keypad_clear}}</button><button id="keypad-0" type="button">0</button><button id="keypad-delete" type="button" aria-label="{{web_keypad_delete}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h12v14H9l-7-7 7-7Z"/><path d="m12 9 6 6m0-6-6 6"/></svg></button>
+</div>
+</div>
 <noscript>{{web_enable_javascript_in_your_browser_settings_then_reload}}</noscript>
 </body>
 </html>

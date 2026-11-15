@@ -14,6 +14,8 @@ import { createBrowserAudio } from './browser-audio.js';
 import { createBrowserLocation } from './browser-location.js';
 import { createBrowserMediaSession } from './browser-media-session.js';
 import { readUrlFlags } from './url-flags.js';
+import { createPairingCodeInput, placePairingKeypad } from './pairing-keypad.js';
+import { createImageDebugStats } from './debug-stats.js';
 
 if (typeof document !== 'undefined') {
   const $ = id => document.getElementById(id);
@@ -31,16 +33,126 @@ if (typeof document !== 'undefined') {
     set(key, value) { try { window.localStorage.setItem(key, value); } catch (_) {} },
     remove(key) { try { window.localStorage.removeItem(key); } catch (_) {} },
   };
+  const pinDigits = Array.from({ length: 6 }, (_, index) => $(`code-digit-${index + 1}`));
+  const keypad = $('pairing-keypad');
+  keypad.hidden = true;
+  let keypadFrame = null, keypadNeedsReveal = false, suppressKeypadFocus = false;
+  const pairingCode = createPairingCodeInput(pinDigits, $('code'), {
+    onChange(valid) {
+      // Readonly fields suppress platform keyboards. Keep native form validation on
+      // the submit button, which cannot summon a platform keyboard when invalid.
+      $('connect').setCustomValidity?.(valid ? '' : t('web_pairing_code_incomplete'));
+      $('keypad-code').textContent = pinDigits.map(input => input.value || '·').join(' ');
+      if (valid && $('message').textContent === t('web_pairing_code_incomplete')) $('message').textContent = '';
+    },
+    onFocus(index) { if (!suppressKeypadFocus) openPinKeypad(index); },
+    onDismiss: closePinKeypad,
+  });
+  function clearPinKeypadSpace() {
+    $('keypad-scroll-space').hidden = true;
+    document.body?.classList.toggle('pin-keypad-open', false);
+  }
+  function closePinKeypad(keepScrollSpace = false) {
+    if (keypadFrame !== null) cancelAnimationFrame(keypadFrame);
+    keypadFrame = null; keypadNeedsReveal = false;
+    try { keypad.hidePopover?.(); } catch (_) {}
+    keypad.hidden = true;
+    if (!keepScrollSpace) clearPinKeypadSpace();
+    pinDigits.forEach(input => { input.setAttribute('aria-expanded', 'false'); input.classList?.toggle('keypad-active', false); });
+  }
+  function positionPinKeypad(reveal = false) {
+    if (keypad.hidden) return;
+    const visual = window.visualViewport;
+    const visible = { left: visual?.offsetLeft || 0, top: visual?.offsetTop || 0,
+      width: visual?.width || window.innerWidth, height: visual?.height || window.innerHeight };
+    const content = $('main-content').getBoundingClientRect();
+    const viewport = { left: Math.max(visible.left, content.left), top: Math.max(visible.top, content.top) };
+    viewport.width = Math.min(visible.left + visible.width, content.right) - viewport.left;
+    viewport.height = Math.min(visible.top + visible.height, content.bottom) - viewport.top;
+    const anchor = $('pin-inputs');
+    let rect = anchor.getBoundingClientRect();
+    keypad.style.width = `${Math.max(1, Math.min(304, viewport.width - 24))}px`;
+    keypad.style.maxHeight = `${Math.max(1, viewport.height - 24)}px`;
+    const keyHeight = Math.max(28, Math.min(48, Math.floor((viewport.height - rect.height - 24 - 8 - 98) / 4)));
+    keypad.style.setProperty('--keypad-key-height', `${keyHeight}px`);
+    const size = keypad.getBoundingClientRect();
+    let position = placePairingKeypad(rect, viewport, size);
+    if (!position) {
+      // Let users scroll away from the field without fighting their scroll gesture.
+      if (!reveal) { closePinKeypad(true); return; }
+      const spacer = $('keypad-scroll-space');
+      spacer.style.height = `${size.height + rect.height + 32}px`; spacer.hidden = false;
+      $('main-content').scrollTop += rect.top - viewport.top - 12;
+      rect = anchor.getBoundingClientRect();
+      position = placePairingKeypad(rect, viewport, size);
+    }
+    // Extremely short viewports retain a scrollable keypad and a visible copy of
+    // all six digits in its header, even when both full controls cannot fit.
+    position ||= { left: Math.max(viewport.left + 12, Math.min(rect.left, viewport.left + viewport.width - size.width - 12)),
+      top: viewport.top + viewport.height - size.height - 12, placement: 'compact' };
+    keypad.style.left = `${position.left}px`; keypad.style.top = `${position.top}px`;
+    keypad.dataset.placement = position.placement;
+  }
+  function schedulePinKeypad(event) {
+    keypadNeedsReveal ||= event?.type === 'resize';
+    if (keypad.hidden || keypadFrame !== null) return;
+    keypadFrame = requestAnimationFrame(() => {
+      keypadFrame = null; const reveal = keypadNeedsReveal; keypadNeedsReveal = false; positionPinKeypad(reveal);
+    });
+  }
+  function openPinKeypad(index) {
+    if ($('code-entry').hidden || pinDigits[index].disabled) return;
+    pinDigits.forEach((input, slot) => { input.setAttribute('aria-expanded', 'true'); input.classList?.toggle('keypad-active', slot === index); });
+    if (keypad.hidden) {
+      keypad.hidden = false;
+      document.body?.classList.toggle('pin-keypad-open', true);
+      try { keypad.showPopover?.(); } catch (_) {}
+    }
+    positionPinKeypad(true);
+  }
+  for (let digit = 0; digit <= 9; digit++) $('keypad-' + digit).addEventListener('click', () => pairingCode.digit(String(digit)));
+  $('keypad-delete').addEventListener('click', () => pairingCode.backspace());
+  $('keypad-clear').addEventListener('click', () => pairingCode.clear());
+  $('keypad-done').addEventListener('click', () => {
+    closePinKeypad(); suppressKeypadFocus = true;
+    pinDigits[pairingCode.activeIndex].focus({ preventScroll: true }); suppressKeypadFocus = false;
+  });
+  keypad.addEventListener('pointerdown', event => { if (event.target.closest('button')) event.preventDefault(); });
+  keypad.addEventListener('keydown', event => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (/^[0-9]$/.test(event.key)) { event.preventDefault(); pairingCode.digit(event.key); }
+    else if (event.key === 'Backspace') { event.preventDefault(); pairingCode.backspace(); }
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!keypad.hidden && !keypad.contains(event.target) && !pinDigits.includes(event.target)) closePinKeypad(true);
+  });
+  document.addEventListener('click', () => { if (keypad.hidden) clearPinKeypadSpace(); });
+  document.addEventListener('keyup', () => { if (keypad.hidden) clearPinKeypadSpace(); });
+  document.addEventListener('focusin', event => {
+    if (!keypad.hidden && !keypad.contains(event.target) && !pinDigits.includes(event.target)) closePinKeypad(true);
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !keypad.hidden) { event.preventDefault(); closePinKeypad(); } });
+  $('main-content').addEventListener('scroll', schedulePinKeypad, { passive: true });
+  window.addEventListener('resize', schedulePinKeypad);
+  for (const event of ['resize', 'scroll']) window.visualViewport?.addEventListener(event, schedulePinKeypad);
+  $('connect').addEventListener('invalid', event => {
+    event.preventDefault(); $('message').textContent = t('web_pairing_code_incomplete'); pairingCode.focus();
+  });
   const screen = $('screen');
   const screens = [screen, $('screen-next'), $('screen-third')];
   const heldFrame = $('held-frame');
   let video = null;
-  const canvas = $('video-canvas');
+  // Context types cannot change on a canvas. Keep a separate surface for the opt-in WebGL
+  // backend so toggling the experiment between display sessions always gets a fresh context.
+  const canvas2d = $('video-canvas'), canvasWebgl = $('video-canvas-webgl');
+  let canvas = canvas2d;
   const display = $('display');
   const touchSurface = $('touch-surface');
   // Read-only diagnostic snapshots; counters never include pairing credentials or video payloads.
-  const rendererStats = { selectedMode: 'native', activeMode: 'waiting', renderedFps: null, renderedFrames: null, fallbackReason: null };
+  const rendererStats = { selectedMode: 'native', activeMode: 'waiting', renderBackend: null, renderedFps: null, renderedFrames: null, fallbackReason: null };
+  const imageDebugStats = createImageDebugStats();
   const performanceStats = { source: null, transport: null, receiver: null, image: null, presentation: rendererStats };
+  const imageDebugLine = () => { const stats = imageDebugStats.sample(); return stats.fps === null ? '' : ` · ${stats.fps} fps${stats.decodeMs === null ? '' : ` / ${stats.decodeMs.toFixed(1)} ms decode`}`; };
   const webpSupport = probeWebp();
   // `undefined` until the HEVC probe settles, `null` when this browser cannot decode it at all.
   let hevcCodec;
@@ -142,6 +254,8 @@ if (typeof document !== 'undefined') {
       if (meta.width && (meta.width !== frameWidth || meta.height !== frameHeight)) return false;
       if (!presentation.present(meta, frameWidth, frameHeight, 'jpeg', meta.revision)) return false;
       width = frameWidth; height = frameHeight;
+      // Browser-local decode timing for the ?diag=1 line (debug-stats.js).
+      imageDebugStats.frame(meta.receivedAt);
       clearHeldFrame(); return true;
     },
     onError: meta => {
@@ -150,12 +264,17 @@ if (typeof document !== 'undefined') {
     },
   });
   const rendererPreference = 'wheelplay.videoRenderer';
+  const webglPreference = 'wheelplay.canvasWebgl';
+  const webglOption = $('canvas-webgl');
+  webglOption.checked = storage.get(webglPreference) === 'true';
+  webglOption.addEventListener('change', () => { storage.set(webglPreference, String(webglOption.checked)); });
   let selectedMode = 'native';
   try {
     selectedMode = videoRendererPreference(storage.get(rendererPreference), storage.get('wheelplay.canvasVideo'));
     storage.set(rendererPreference, selectedMode);
   } catch (_) {}
   let launchMode = selectedMode;
+  let launchWebgl = false;
   const RENDERER_MODES = ['native', 'video-canvas', 'track-canvas'];
   const processorSupported = () => typeof MediaStreamTrackProcessor === 'function';
   function updateRendererOptions() {
@@ -164,6 +283,7 @@ if (typeof document !== 'undefined') {
       $(`renderer-${mode}-card`).classList.toggle('selected', selectedMode === mode);
     }
     $('renderer-hint').hidden = selectedMode !== 'track-canvas' || processorSupported();
+    webglOption.disabled = selectedMode === 'native';
   }
   for (const mode of RENDERER_MODES) {
     $(`renderer-${mode}`).addEventListener('change', () => {
@@ -264,10 +384,12 @@ if (typeof document !== 'undefined') {
     }
   } catch (_) {}
   function showPairingReady(name = t("web_browser_paired"), autoStart = true) {
+    closePinKeypad();
     $('remembered-device').hidden = autoLaunch;
     $('device-name').textContent = name;
     $('qr-pairing').hidden = true; $('pair-instructions').hidden = true;
     $('code-entry').hidden = true; $('code').required = false; $('code').disabled = true;
+    pairingCode.enabled(false);
     $('connect-form').hidden = autoLaunch && !userDisconnected;
     $('connect-label').textContent = t("web_start_display");
     $('connect').disabled = false;
@@ -276,11 +398,13 @@ if (typeof document !== 'undefined') {
     if (autoStart && autoLaunch && pairingToken && !userDisconnected) launch();
   }
   function showPairingEntry() {
+    closePinKeypad();
     // QR/code pairing remains available under `?manual=1`; the default path never shows it.
     const manual = !autoLaunch;
     $('remembered-device').hidden = true;
     $('qr-pairing').hidden = !manual; $('pair-instructions').hidden = !manual;
     $('code-entry').hidden = !manual; $('code').required = manual; $('code').disabled = !manual;
+    pairingCode.enabled(manual);
     $('connect-form').hidden = !manual && !userDisconnected;
     $('connect-label').textContent = t(userDisconnected ? "web_reconnect" :
       manual ? "web_pair_start_display" : "web_start_display");
@@ -522,7 +646,7 @@ if (typeof document !== 'undefined') {
       desktop.release(false); desktopRevision = value.revision;
     }
     live = value.interactive;
-    for (const surface of [...screens, video, canvas, heldFrame].filter(Boolean)) surface.classList.toggle('stale', !value.visible);
+    for (const surface of [...screens, video, canvas2d, canvasWebgl, heldFrame].filter(Boolean)) surface.classList.toggle('stale', !value.visible);
     touchSurface.classList.toggle('stale', !live);
     $('waiting').hidden = value.visible;
     $('desktop-back').disabled = !live;
@@ -539,7 +663,8 @@ if (typeof document !== 'undefined') {
     // ?diag=1 keeps the status line short: the fixed-height top bar cannot hold a negotiation
     // snapshot without overflowing over the picture. The detail goes into its own box instead.
     const rtcReason = rtc?.lastReason || serverRtcHint;
-    const diagnostic = diagnosticStatus ? ` · WebRTC: ${rtcReason || (rtc?.active ? 'ok' : 'idle')}` : '';
+    const diagnostic = diagnosticStatus
+      ? ` · WebRTC: ${rtcReason || (rtc?.active ? 'ok' : 'idle')}${value.visible && value.frame?.transport !== 'rtc' ? imageDebugLine() : ''}` : '';
     const image = performanceStats.image;
     // Only the path that is painting the picture owns this line. A live video transport leaves the
     // still-image encoder idle, so reporting its 0 fps beside a smooth picture reads as a stall -
@@ -794,7 +919,7 @@ if (typeof document !== 'undefined') {
     const auth = pairingToken ? `token=${encodeURIComponent(pairingToken)}` : `code=${encodeURIComponent($('code').value)}`;
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/stream?${auth}&media=2&images=3&nowPlaying=1`);
     ws.binaryType = 'arraybuffer';
-    const mode = launchMode;
+    const mode = launchMode, webgl = launchWebgl;
     socket = ws;
     const connectTimer = setTimeout(() => ws.close(), 8000);
     ws.onopen = () => {
@@ -813,14 +938,14 @@ if (typeof document !== 'undefined') {
       webpSupport.then(supported => {
         if (supported && socket === ws && ws.readyState === WebSocket.OPEN) send({ type: 'image-format', format: 'webp' });
       });
-      Object.assign(rendererStats, { selectedMode: mode, activeMode: 'waiting', renderedFps: null, renderedFrames: null,
+      Object.assign(rendererStats, { selectedMode: mode, activeMode: 'waiting', renderBackend: null, renderedFps: null, renderedFrames: null,
         fallbackReason: mode === 'track-canvas' && !processorSupported() ? 'processor-unsupported' : null });
       rtc = createRtcReceiver(callbacks => {
         if (mode === 'track-canvas') {
           if (!processorSupported()) throw new Error('processor-unsupported');
-          return createTrackCanvasRenderer(canvas, callbacks);
+          return createTrackCanvasRenderer(canvas, { ...callbacks, webgl });
         }
-        return createVideoRenderer(mode, canvas, { ...callbacks, createVideo: createLegacyVideo, keepVisible: keepVideoVisible });
+        return createVideoRenderer(mode, canvas, { ...callbacks, webgl, createVideo: createLegacyVideo, keepVisible: keepVideoVisible });
       }, { send, experiment: rtcExperiment,
         onReset: () => { holdRtcFrame(); presentation.invalidate('rtc'); },
         onResize: size => { if (socket === ws) showRtcSize(size); },
@@ -839,6 +964,7 @@ if (typeof document !== 'undefined') {
           const outputFps = mode === 'track-canvas' ? metrics.renderedFps : fps;
           rtcFps = outputFps === null ? null : Math.round(outputFps); performanceStats.receiver = metrics;
           rendererStats.renderedFps = metrics.renderedFps; rendererStats.renderedFrames = metrics.renderedFrames;
+          rendererStats.renderBackend = metrics.renderBackend ?? null;
           // Same re-assertion as the codec path below: a dropped first-frame commit must not
           // outlive a receiver that is still decoding.
           if (rtc.active && lastRtcSize) showRtcSize(lastRtcSize);
@@ -870,6 +996,7 @@ if (typeof document !== 'undefined') {
         onStats: (fps, metrics) => {
           codecFps = fps === null ? null : Math.round(fps); performanceStats.receiver = metrics;
           rendererStats.renderedFps = fps; rendererStats.renderedFrames = metrics.decoded;
+          rendererStats.renderBackend = metrics.renderBackend ?? null;
           // The one-shot onReady can be lost (a second auto-pair socket, a late JPEG, a refused
           // commit). The stats tick proves the decoder is still drawing, so re-assert the live
           // frame here instead of waiting for a manual refresh.
@@ -1009,6 +1136,7 @@ if (typeof document !== 'undefined') {
       if (rtc?.active) { acknowledge(); return; }
       meta.revision = presentation.current.revision;
       const payload = packet ? packet.jpeg : event.data;
+      meta.receivedAt = performance.now();
       jpeg.load(payload instanceof ArrayBuffer ? new Blob([payload], { type: packet?.mime || 'image/jpeg' }) : payload, meta,
         () => socket === ws && ws.readyState === WebSocket.OPEN && !rtc?.active && presentation.current.revision === meta.revision,
         acknowledge);
@@ -1049,6 +1177,8 @@ if (typeof document !== 'undefined') {
   /** Start display; the default pairing path calls this without a click. */
   function launch() {
     launchMode = selectedMode;
+    launchWebgl = selectedMode !== 'native' && webglOption.checked;
+    canvas = launchWebgl ? canvasWebgl : canvas2d;
     const generation = ++authGeneration;
     stopQr(); $('connect').disabled = true; $('message').textContent = '';
     const start = () => { if (generation === authGeneration) { stopped = false; attempts = 0; connect(); } };
@@ -1091,6 +1221,10 @@ if (typeof document !== 'undefined') {
   }
   $('connect-form').addEventListener('submit', event => {
     event.preventDefault();
+    if (!pairingToken && !deviceCredential && !$('code-entry').hidden && !pairingCode.complete) {
+      $('message').textContent = t('web_pairing_code_incomplete'); pairingCode.focus(); return;
+    }
+    closePinKeypad();
     if (userDisconnected) { userDisconnected = false; initializePairing(); return; }
     launch();
   });
@@ -1169,7 +1303,7 @@ if (typeof document !== 'undefined') {
     surface.addEventListener('pointercancel', cancel);
     surface.addEventListener('lostpointercapture', cancel);
   }
-  for (const surface of [...screens, canvas, touchSurface]) bindSurface(surface);
+  for (const surface of [...screens, canvas2d, canvasWebgl, touchSurface]) bindSurface(surface);
   window.addEventListener('blur', release);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) release();
@@ -1182,7 +1316,7 @@ if (typeof document !== 'undefined') {
   window.addEventListener('pageshow', event => { if (event.persisted) initializePairing(); });
   const linkedCode = pairingCodeFromUrl(window.location?.search || '');
   if (linkedCode) {
-    $('code').value = linkedCode;
+    pairingCode.set(linkedCode);
     // Keep the short-lived code out of copied URLs and browser history entries.
     window.history?.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
   }
