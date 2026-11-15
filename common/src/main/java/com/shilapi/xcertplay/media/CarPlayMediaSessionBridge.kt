@@ -173,6 +173,11 @@ internal class CarPlayMediaSessionBridge(
 
     private fun apply(next: NowPlayingState) {
         val wasPaused = state.status == PhonePlaybackStatus.PAUSED || state.status == PhonePlaybackStatus.STOPPED
+        // A head unit caches the AVRCP metadata of whichever session was active when its Bluetooth
+        // link came up. Re-announce ours whenever the phone becomes usable again, otherwise the
+        // car keeps showing the stale track left by another player's still-active session.
+        val becameAvailable = !state.available && next.available
+        val reconnected = !state.connected && next.connected
         if (state.connectionGeneration != next.connectionGeneration || state.trackRevision != next.trackRevision ||
             state.connected && !next.connected) {
             ++commandGeneration
@@ -196,7 +201,11 @@ internal class CarPlayMediaSessionBridge(
                 }
             }
         }
-        render() // Foreground mediaPlayback type precedes a focus request on Android 15+.
+        if (becameAvailable || reconnected) {
+            // Force a full AVRCP snapshot when the phone comes back, not just a metadata delta.
+            focusBlocked = false
+            render(forceReannounce = true)
+        } else render() // Foreground mediaPlayback type precedes a focus request on Android 15+.
         if (!remote) {
             if (state.playing) { if (wasPaused) focusBlocked = false; if (!pausePending) requestFocus() }
             else if (state.status != PhonePlaybackStatus.UNKNOWN) {
@@ -222,7 +231,13 @@ internal class CarPlayMediaSessionBridge(
         focused = false
     }
 
-    private fun render() {
+    private fun render(forceReannounce: Boolean = false) {
+        if (forceReannounce && state.available) {
+            // Drop the cache so setMetadata runs even for an unchanged track, and toggle the
+            // active flag so Android broadcasts a fresh active-session change to AVRCP.
+            publishedMetadata = null
+            session.isActive = false
+        }
         session.isActive = state.available
         if (!state.available) {
             if (publishedMetadata != null) session.setMetadata(null)
@@ -263,6 +278,20 @@ internal class CarPlayMediaSessionBridge(
         session.setPlaybackState(PlaybackState.Builder().setActions(actions)
             .setState(playback, state.positionMs ?: PlaybackState.PLAYBACK_POSITION_UNKNOWN, state.speed, state.positionAtMs).build())
         changed(state, session, cover ?: defaultArtwork)
+    }
+
+    /**
+     * A Bluetooth AVRCP sink reads metadata when its link is established. Re-publish the whole
+     * snapshot when one appears, so a reconnect cannot surface another player's stale session.
+     */
+    fun refreshRemoteSession() {
+        if (closed) return
+        main.post {
+            if (closed || !state.available) return@post
+            focusBlocked = false
+            render(forceReannounce = true)
+            if (!remote && !pausePending && state.playing) requestFocus()
+        }
     }
 
     override fun close() {

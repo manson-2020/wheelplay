@@ -319,4 +319,36 @@ class CarPlayMediaSessionBridgeTest {
         bridge.close()
     }
 
+    @Test fun availabilityAndBluetoothSinkReannounceTheAvrcpSnapshot() {
+        val context: Context = RuntimeEnvironment.getApplication()
+        val source = Source(); val output = Output()
+        val bridge = CarPlayMediaSessionBridge(context) { _, _, _ -> }
+        try {
+            bridge.bind(source, output); idle()
+            val recorded = org.robolectric.shadow.api.Shadow.extract<RecordingMediaSession>(bridge.session)
+            assertFalse(bridge.session.isActive)
+            // Becoming available toggles active and publishes a complete snapshot.
+            val changesBefore = recorded.activeChanges
+            source.update(playing()); idle()
+            assertTrue(bridge.session.isActive)
+            assertTrue(recorded.activeChanges >= changesBefore + 2)
+            assertEquals("Song", recorded.recordedMetadata!!.getString(MediaMetadata.METADATA_KEY_TITLE))
+            val publications = recorded.metadataPublications
+            // An A2DP sink appearing must republish even when the track is unchanged.
+            val changesBeforeRefresh = recorded.activeChanges
+            bridge.refreshRemoteSession(); idle()
+            assertEquals(publications + 1, recorded.metadataPublications)
+            assertTrue(recorded.activeChanges >= changesBeforeRefresh + 2)
+            assertEquals("Song", recorded.recordedMetadata!!.getString(MediaMetadata.METADATA_KEY_TITLE))
+            // Ordinary incremental updates keep the existing no-republish behaviour.
+            source.update(playing()); idle()
+            assertEquals(publications + 1, recorded.metadataPublications)
+            // A sink callback while the phone is unavailable must not resurrect the session.
+            source.update(NowPlayingState()); idle()
+            bridge.refreshRemoteSession(); idle()
+            assertFalse(bridge.session.isActive)
+            assertNull(recorded.recordedMetadata)
+        } finally { bridge.close() }
+    }
+
 }

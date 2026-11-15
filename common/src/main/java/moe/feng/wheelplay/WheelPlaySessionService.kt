@@ -12,6 +12,9 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.drawable.Icon
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.session.MediaSession
 import android.net.Uri
 import android.os.Build
@@ -37,6 +40,7 @@ class WheelPlaySessionService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var media: CarPlayMediaSessionBridge
     private var sessionSubscription: AutoCloseable? = null
+    private var audioDeviceCallback: AudioDeviceCallback? = null
     private val main = Handler(Looper.getMainLooper())
     private var destroyed = false
     private var currentState = NowPlayingState()
@@ -78,6 +82,21 @@ class WheelPlaySessionService : Service() {
                     }
                 }
             }
+        // A head unit reads AVRCP metadata when its A2DP link comes up. On a Bluetooth reconnect
+        // that can surface another player's stale session (or its stale media-button routing), so
+        // re-publish our snapshot as soon as a Bluetooth sink is added. No Bluetooth permission
+        // is needed for AudioDeviceCallback.
+        getSystemService(AudioManager::class.java).let { manager ->
+            val callback = object : AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+                    if (addedDevices.any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }) {
+                        main.post { if (!destroyed) media.refreshRemoteSession() }
+                    }
+                }
+            }
+            manager.registerAudioDeviceCallback(callback, main)
+            audioDeviceCallback = callback
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -259,6 +278,8 @@ class WheelPlaySessionService : Service() {
         destroyed = true
         if (browserMediaBridge === media) browserMediaBridge = null
         sessionSubscription?.close()
+        audioDeviceCallback?.let { getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(it) }
+        audioDeviceCallback = null
         media.close()
         runWebAction { WebSession.stop() }
         wakeLock?.let { if (it.isHeld) it.release() }

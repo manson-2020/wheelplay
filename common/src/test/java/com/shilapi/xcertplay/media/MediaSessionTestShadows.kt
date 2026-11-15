@@ -30,6 +30,7 @@ class RecordingMediaSession : ShadowMediaSession() {
     var callback: MediaSession.Callback? = null
     var handler: Handler? = null
     var recordedActive = false
+    var activeChanges = 0
     var released = false
     var playbackType = MediaController.PlaybackInfo.PLAYBACK_TYPE_LOCAL
     var attributes: AudioAttributes? = null
@@ -43,7 +44,7 @@ class RecordingMediaSession : ShadowMediaSession() {
     @Implementation fun setCallback(value: MediaSession.Callback?, handler: Handler?) {
         register(); callback = value; this.handler = handler
     }
-    @Implementation fun setActive(value: Boolean) { register(); recordedActive = value }
+    @Implementation fun setActive(value: Boolean) { register(); recordedActive = value; activeChanges++ }
     @Implementation fun isActive() = recordedActive
     @Implementation fun release() { released = true; recordedActive = false; callback = null }
     @Implementation fun setPlaybackToLocal(value: AudioAttributes) {
