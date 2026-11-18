@@ -1,3 +1,4 @@
+import { sourcePanel, resizeNotice } from './source-control.js';
 import { t } from './text.js';
 import { createDesktopInput } from './desktop-input.js';
 import { mapPoint, pairingCodeFromUrl, unzoomedDisplayRect, browserViewportSize } from './viewport.js';
@@ -147,6 +148,8 @@ if (typeof document !== 'undefined') {
   const canvas2d = $('video-canvas'), canvasWebgl = $('video-canvas-webgl');
   let canvas = canvas2d;
   const display = $('display');
+  const resizeDialog = $('resize-dialog');
+  let dismissedResize = null;
   const touchSurface = $('touch-surface');
   // Read-only diagnostic snapshots; counters never include pairing credentials or video payloads.
   const rendererStats = { selectedMode: 'native', activeMode: 'waiting', renderBackend: null, renderedFps: null, renderedFrames: null, fallbackReason: null };
@@ -177,6 +180,8 @@ if (typeof document !== 'undefined') {
   // Latest server-side WebRTC hint and capability snapshot, kept for the ?diag=1 status line.
   let serverRtcHint = '', serverVcsHint = '', serverRtcDiag = '';
   let serverMedia = null;
+  let sourceControl = null, sourceRequest = null, sourceReply = '', sourceSequence = 0;
+  let sourceRequestTimer = null;
   let socket = null, stopped = true, paired = false, retry = null, attempts = 0;
   let width = 1280, height = 720, live = false, lastStatus = 0, rtcMedia = {}, codecMedia = {};
   let heartbeat = null, movePending = false, moveGeneration = 0, outbox = null;
@@ -645,10 +650,20 @@ if (typeof document !== 'undefined') {
     if (value.revision !== desktopRevision) {
       desktop.release(false); desktopRevision = value.revision;
     }
-    live = value.interactive;
+    renderResizeNotice();
+    live = value.interactive && !settingsOpen && !resizeDialog.open;
     for (const surface of [...screens, video, canvas2d, canvasWebgl, heldFrame].filter(Boolean)) surface.classList.toggle('stale', !value.visible);
     touchSurface.classList.toggle('stale', !live);
     $('waiting').hidden = value.visible;
+    const panel = sourcePanel(sourceControl, value, !!rendererStats.fallbackReason);
+    $('stage').textContent = t(panel.title, panel.name || '');
+    $('source-action').hidden = !panel.action;
+    $('source-action').disabled = sourceRequest !== null;
+    $('source-action').textContent = t(panel.label || 'web_source_connect', panel.name || '');
+    $('source-message').textContent = sourceReply || (!sourceControl?.activeId && sourceControl?.notice) || t(panel.hint, panel.name || '');
+    $('media-retry').hidden = !panel.retry;
+    $('source-stop').hidden = !value.visible || sourceControl?.action !== 'stop';
+    $('source-stop').disabled = sourceRequest !== null;
     $('desktop-back').disabled = !live;
     if (!live && (pointers.size || desktop.active)) release();
     const rtcVisible = rtc && value.visible && value.frame?.transport === 'rtc';
@@ -707,9 +722,9 @@ if (typeof document !== 'undefined') {
     // `?diag=1` is the only way to tell a head unit that reports its own light/dark preference
     // from one that always answers light: flip the car's appearance and watch this word.
     const schemeLine = `scheme=${browserDarkMode === null ? 'unknown' : browserDarkMode ? 'dark' : 'light'}`;
-    const panel = $('diag-panel');
-    panel.hidden = !diagnosticStatus;
-    if (diagnosticStatus) panel.textContent = [detail, schemeLine].filter(Boolean).join('\n');
+    const diagPanel = $('diag-panel');
+    diagPanel.hidden = !diagnosticStatus;
+    if (diagnosticStatus) diagPanel.textContent = [detail, schemeLine].filter(Boolean).join('\n');
     // The status line now lives inside the drawer, which stays closed while driving. The picture
     // overlay is therefore the only visible surface for a "picture is up but touch is not" warning.
     const showWarning = value.visible && !value.interactive;
@@ -765,6 +780,7 @@ if (typeof document !== 'undefined') {
     stopQr();
     authGeneration++;
     stopped = true; paired = false; release();
+    sourceControl = null; sourceRequest = null; dismissedResize = null; clearTimeout(sourceRequestTimer);
     if (outbox) { outbox.close(); outbox = null; }
     clearTimeout(retry); clearInterval(heartbeat);
     if (socket) { const old = socket; socket = null; old.close(); }
@@ -1005,8 +1021,9 @@ if (typeof document !== 'undefined') {
         },
       });
       $('message').textContent = '';
-      $('phone-connect').disabled = false;
-      $('phone-connect-message').textContent = t("web_keep_wheelplay_in_the_foreground_on_android_tap_connect");
+      sourceControl = null; sourceRequest = null; sourceReply = ''; clearTimeout(sourceRequestTimer);
+      $('media-retry').disabled = false;
+      presentation.refresh();
       $('pairing').hidden = true; $('display').hidden = false; $('disconnect').hidden = false;
       lastViewportSignature = '';
       scheduleViewportReport();
@@ -1045,10 +1062,13 @@ if (typeof document !== 'undefined') {
         }
         codec.receive(data); return;
       }
-        if (data.type === 'phone-connect-result') {
-          $('phone-connect').disabled = false;
-          $('phone-connect-message').textContent = data.message;
-          return;
+        if (data.type === 'source-action-result') {
+          if (data.requestId !== sourceRequest) return;
+          sourceRequest = null; clearTimeout(sourceRequestTimer);
+          const messages = { requested: 'web_source_request_sent', configure: 'web_source_android_help',
+            stopped: 'web_source_stopped', pending: 'web_source_pending', stale: 'web_source_changed', failed: 'web_source_failed' };
+          sourceReply = t(messages[data.result] || 'web_source_failed');
+          presentation.refresh(); send({ type: 'ping' }); return;
         }
         if (data.type === 'busy') {
           // Another head unit already owns the stream. Re-entering the auto-launch cycle here
@@ -1071,6 +1091,10 @@ if (typeof document !== 'undefined') {
           // The phone's own battery and radio stay current even while no video is flowing, so the
           // badge is refreshed before any early return below.
           renderPhoneStatus(data.phone);
+          if (sourceControl?.revision !== data.sourceControl?.revision) {
+            sourceReply = ''; sourceRequest = null; clearTimeout(sourceRequestTimer);
+          }
+          sourceControl = data.sourceControl?.version === 1 ? data.sourceControl : null;
           performanceStats.source = data.performance?.source ?? null;
           performanceStats.transport = data.performance?.transport ?? null;
           performanceStats.image = data.performance?.image ?? null;
@@ -1089,7 +1113,8 @@ if (typeof document !== 'undefined') {
             if (rtcMedia.revision !== presentation.current.revision) { rtc.close(); rtcRequested = false; }
             if (codecMedia.revision !== presentation.current.revision) { codec.close(); codecRequested = false; }
           }
-          $('stage').textContent = data.stage || t("web_waiting_for_iphone_video");
+          $('source-detail').textContent = data.sourceError ? data.stage || '' : '';
+          $('source-detail').hidden = !data.sourceError;
           rtc.progress(data.rtcFrames || 0);
           codec.progress(data.vcsFrames || 0);
           if (data.vcsAvailable && !codecRequested && !codec.active && typeof VideoDecoder !== 'undefined') {
@@ -1144,6 +1169,7 @@ if (typeof document !== 'undefined') {
     ws.onclose = () => {
       clearTimeout(connectTimer);
       if (socket !== ws) return;
+      clearTimeout(sourceRequestTimer); sourceRequest = null; sourceControl = null; sourceReply = '';
       if (outbox) { outbox.close(); outbox = null; }
       cancelMove();
       socket = null; pointers.clear(); desktop.release(false); pointerInput = false; keyboardInput = false; backButton = false; $('desktop-back').hidden = true;
@@ -1228,13 +1254,46 @@ if (typeof document !== 'undefined') {
     if (userDisconnected) { userDisconnected = false; initializePairing(); return; }
     launch();
   });
-  $('phone-connect').addEventListener('click', () => {
-    if (!paired || !send({ type: 'phone-connect' })) {
-      $('phone-connect-message').textContent = t("web_browser_connection_interrupted_pair_again_and_retry");
-      return;
+  function requestSourceAction(action = sourceControl?.action) {
+    if (!action || sourceRequest || !socket || socket.readyState !== WebSocket.OPEN) return;
+    const requestId = String(++sourceSequence);
+    if (!send({ type: 'source-action', requestId, action,
+      sourceId: sourceControl.activeId || sourceControl.selectedId, revision: sourceControl.revision })) return;
+    sourceRequest = requestId; sourceReply = t('web_source_pending'); presentation.refresh();
+    sourceRequestTimer = setTimeout(() => {
+      if (sourceRequest !== requestId) return;
+      sourceRequest = null; sourceReply = t('web_source_failed'); presentation.refresh();
+    }, 10000);
+  }
+  $('source-action').addEventListener('click', () => requestSourceAction());
+  $('source-stop').addEventListener('click', () => requestSourceAction());
+  function renderResizeNotice(force = false) {
+    const notice = resizeNotice(sourceControl);
+    $('resize-review').hidden = !notice;
+    if (!notice) { if (resizeDialog.open) resizeDialog.close(); return; }
+    $('resize-description').textContent = t('web_resize_description', notice.width, notice.height, notice.name);
+    $('resize-foreground').hidden = notice.canReconnect;
+    $('resize-reconnect').disabled = !notice.canReconnect || sourceRequest !== null;
+    if ((force || dismissedResize !== notice.key) && !settingsOpen && !resizeDialog.open) {
+      release(); desktop.release(); resizeDialog.showModal();
     }
-    $('phone-connect').disabled = true;
-    $('phone-connect-message').textContent = t("web_requesting_iphone_connection");
+  }
+  function dismissResize() {
+    dismissedResize = resizeNotice(sourceControl)?.key || null;
+    resizeDialog.close();
+  }
+  $('resize-later').addEventListener('click', dismissResize);
+  resizeDialog.addEventListener('cancel', event => { event.preventDefault(); dismissResize(); });
+  resizeDialog.addEventListener('close', () => presentation.refresh());
+  $('resize-review').addEventListener('click', () => { setSettingsOpen(false); renderResizeNotice(true); presentation.refresh(); });
+  $('resize-reconnect').addEventListener('click', () => {
+    if (!resizeNotice(sourceControl)?.canReconnect || sourceRequest !== null) return;
+    requestSourceAction('reconnect'); dismissResize();
+  });
+  $('media-retry').addEventListener('click', () => {
+    // Reopen only the browser transport. The Android source and its SDK keep running.
+    $('media-retry').disabled = true;
+    socket?.close();
   });
   $('disconnect').addEventListener('click', () => {
     userDisconnected = true;

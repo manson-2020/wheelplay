@@ -51,7 +51,7 @@ const server = http.createServer(async (req,res) => {
     res.end(JSON.stringify(data)); return;
   }
   if (req.url === '/i18n.js') { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); res.setHeader('Cache-Control', 'no-store'); res.end('globalThis.wheelplayMessages = ' + JSON.stringify(messages) + ';'); return; }
-  const file = { '/':'index.html','/app.js':'app.js','/url-flags.js':'url-flags.js','/text.js':'text.js','/style.css':'style.css',
+  const file = { '/':'index.html','/app.js':'app.js','/source-control.js':'source-control.js','/url-flags.js':'url-flags.js','/text.js':'text.js','/style.css':'style.css',
     '/pairing-keypad.js':'pairing-keypad.js','/debug-stats.js':'debug-stats.js','/canvas-frame-painter.js':'canvas-frame-painter.js',
     '/audio-worklet.js':'audio-worklet.js',
     // ES modules split out of app.js; missing entries here 404 the module graph and stall the page.

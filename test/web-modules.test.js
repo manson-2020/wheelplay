@@ -17,7 +17,7 @@ const files = ['app.js', 'audio-worklet.js', 'browser-appearance.js', 'browser-a
   'browser-location.js', 'browser-media-session.js', 'codec-stream.js', 'control-outbox.js',
   'desktop-input.js', 'jpeg-presenter.js', 'media-probes.js', 'phone-gauge.js', 'presentation.js',
   'rtc-receiver.js', 'text.js', 'url-flags.js', 'video-renderer.js', 'viewport.js',
-  'canvas-frame-painter.js', 'debug-stats.js', 'pairing-keypad.js'];
+  'canvas-frame-painter.js', 'debug-stats.js', 'pairing-keypad.js', 'source-control.js'];
 
 const source = name => readFileSync(path.join(webDir, name), 'utf8');
 

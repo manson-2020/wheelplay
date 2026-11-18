@@ -59,7 +59,7 @@ export function createControlOutbox(socket, {
         if (kind === 'move' && tail && tail.kind === 'move' && tail.type === data.type && tail.eventKind === data.kind) tail.json = json;
         else if (touches.length < 64) touches.push({ kind, json, type: data.type, eventKind: data.kind });
         else { fail(); return false; }
-      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'vcs-start', 'vcs-ready', 'vcs-fallback', 'vcs-feedback', 'vcs-keyframe', 'phone-connect', 'image-format', 'location-start', 'location-stop', 'location-clear', 'media', 'media-command', 'browser-appearance'].includes(data.type)) {
+      } else if (['rtc-start', 'rtc-answer', 'rtc-ready', 'rtc-fallback', 'rtc-diag', 'vcs-start', 'vcs-ready', 'vcs-fallback', 'vcs-feedback', 'vcs-keyframe', 'phone-connect', 'source-action', 'image-format', 'location-start', 'location-stop', 'location-clear', 'media', 'media-command', 'browser-appearance'].includes(data.type)) {
         if (signals.length >= 8 || json.length > 32768) { fail(); return false; }
         if (data.type.startsWith('location-')) locationFix = null;
         signals.push(json);

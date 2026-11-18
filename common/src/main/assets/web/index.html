@@ -46,7 +46,7 @@
 <div id="location-message" hidden role="status" aria-live="polite"></div>
 <div id="audio-message" hidden role="status" aria-live="polite"></div>
 <div id="diag-panel" hidden></div>
-<div id="waiting" role="status"><strong>{{web_head_unit_connected}}</strong><p id="stage">{{web_waiting_for_iphone_video}}</p><button id="phone-connect" class="primary" type="button">{{ui_connect_iphone}}</button><p id="phone-connect-message" class="hint" aria-live="polite">{{web_uses_android_s_current_usb_wireless_connection_settings_for}}</p></div>
+<div id="waiting" role="status"><strong>{{web_head_unit_connected}}</strong><p id="stage">{{web_source_waiting}}</p><button id="source-action" class="primary" type="button" hidden>{{web_source_connect}}</button><button id="media-retry" type="button" hidden>{{web_source_retry_media}}</button><p id="source-message" class="hint" aria-live="polite"></p><p id="source-detail" class="hint" hidden></p></div>
 </section>
 </main>
 <div id="settings-scrim" aria-hidden="true"></div>
@@ -66,8 +66,14 @@
 <p id="location-status" class="hint" role="status" aria-live="polite"></p>
 <details class="secure-setup" id="secure-setup"><summary>{{web_browser_microphone_requires_https}}</summary><p>{{web_local_http_pages_cannot_request_microphone_permission_in_the}}</p><code id="tls-fingerprint">{{web_loading}}</code><div class="secure-links"><a href="/certificate.crt" download="wheelplay-certificate.crt">{{web_download_local_certificate}}</a><a id="https-entry" href="#">{{web_open_https_page}}</a></div><p id="tls-error" role="status"></p></details>
 </div>
-<div class="drawer-foot"><button id="fullscreen" type="button">{{web_full_screen}}</button><button id="disconnect" type="button" hidden>{{web_disconnect}}</button><button id="diag-toggle" type="button">{{web_enter_debug_mode}}</button></div>
+<div class="drawer-foot"><button id="fullscreen" type="button">{{web_full_screen}}</button><button id="source-stop" type="button" hidden>{{web_source_stop}}</button><button id="resize-review" type="button" hidden>{{web_resize_review}}</button><button id="disconnect" type="button" hidden>{{web_disconnect}}</button><button id="diag-toggle" type="button">{{web_enter_debug_mode}}</button></div>
 </aside>
+<dialog id="resize-dialog" aria-labelledby="resize-title" aria-describedby="resize-description resize-foreground">
+<h2 id="resize-title">{{web_resize_title}}</h2>
+<p id="resize-description"></p>
+<p id="resize-foreground" class="hint" hidden>{{web_resize_foreground}}</p>
+<div class="settings-actions"><button id="resize-later" type="button" autofocus>{{web_resize_later}}</button><button id="resize-reconnect" type="button" class="primary">{{web_resize_reconnect}}</button></div>
+</dialog>
 <div id="pairing-keypad" popover="manual" role="dialog" aria-modal="false" aria-labelledby="keypad-title" hidden>
 <div class="keypad-heading"><strong id="keypad-title">{{web_keypad_title}}</strong><output id="keypad-code" aria-label="{{web_six_digit_pairing_code_on_the_device}}">· · · · · ·</output><button id="keypad-done" type="button">{{web_keypad_done}}</button></div>
 <div class="keypad-keys">

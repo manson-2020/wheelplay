@@ -167,6 +167,7 @@ internal object WebSession {
         private set
     @Volatile private var localPhoneViewport: Pair<Int, Int>? = null
 
+    private val browserViewportObservers = java.util.concurrent.CopyOnWriteArrayList<(Int?, Int?) -> Unit>()
     @Volatile private var browserViewportListener: ((Int?, Int?) -> Unit)? = null
     @Volatile private var inputSession: ProjectionSession? = null
     val maxTouchContacts get() = projectionSessions.snapshot()?.capabilities?.maxTouchContacts ?: 0
@@ -298,8 +299,7 @@ internal object WebSession {
         )
     }
 
-    private var phoneConnectHandler: (() -> String)? = null
-    private var lastPhoneConnectAt: Long? = null
+    val sourceControl = BrowserSourceControl(projectionSessions)
 
     /**
      * Invoked (on a server thread) when a page proved it cannot decode the HEVC stream this session
@@ -363,38 +363,22 @@ internal object WebSession {
         secureServer?.disconnectViewer()
     }
 
-    // Accessed on the main thread so lifecycle changes and connection requests are ordered.
-    fun setPhoneConnectHandler(handler: (() -> String)?) {
-        phoneConnectHandler = handler
+    fun requestSourceAction(action: String, sourceId: String, revision: Long, reply: (String) -> Unit) {
+        mainHandler.post { sourceControl.execute(action, sourceId, revision, SystemClock.elapsedRealtime(), reply) }
     }
 
+    // Old pages must never turn a plugin selection into a CarPlay connection.
     fun requestPhoneConnection(context: Context, reply: (String) -> Unit) {
         mainHandler.post {
-            val now = SystemClock.elapsedRealtime()
-            val message =
-                when {
-                    projectionSessions.hasSession() ->
-                        context.getString(
-                            UiR.string.projection_busy
-                        )
-                    phoneConnectHandler == null ->
-                        context.getString(
-                            UiR.string.ui_bring_wheelplay_to_the_foreground_on_android_then_tap
-                        )
-                    lastPhoneConnectAt?.let { now - it < 3000 } == true ->
-                        context.getString(UiR.string.ui_connection_requested_please_wait)
-                    else -> {
-                        lastPhoneConnectAt = now
-                        runCatching { phoneConnectHandler!!.invoke() }
-                            .getOrElse {
-                                context.getString(
-                                    UiR.string
-                                        .ui_could_not_start_connection_check_connection_settings_on_android
-                                )
-                            }
-                    }
-                }
-            reply(message)
+            val state = sourceControl.snapshot()
+            if (state.optString("selectedId") != com.shilapi.xcertplay.projection.ProjectionSourceIds.CARPLAY ||
+                state.optString("action") != "connect" || !state.isNull("notice")) reply(context.getString(UiR.string.web_source_refresh))
+            else sourceControl.execute("connect", state.getString("selectedId"), state.getLong("revision"),
+                SystemClock.elapsedRealtime()) { result -> reply(context.getString(when (result) {
+                    "requested" -> UiR.string.web_source_request_sent
+                    "pending" -> UiR.string.web_source_pending
+                    else -> UiR.string.web_source_failed
+                })) }
         }
     }
 
@@ -415,6 +399,7 @@ internal object WebSession {
             mdns = WebMdns(context.applicationContext)
             experienceContext = context.applicationContext
             var previousSource = inputSession
+            var previousCapabilities = inputSession?.capabilities
             offlineSubscription = projectionSessions.subscribe {
                 val changed = synchronized(this) {
                     // Read under the configuration lock: a delayed notification cannot restore an old route.
@@ -434,9 +419,13 @@ internal object WebSession {
                     // Versionless clients cannot distinguish old touches after a source switch.
                     server?.disconnectViewer()
                     secureServer?.disconnectViewer()
-                    configureAudio(context)
                     refreshAppearance(context)
                 }
+                val audioChanged = synchronized(this) {
+                    val capabilities = projectionSessions.snapshot()?.capabilities
+                    (previousCapabilities != capabilities).also { previousCapabilities = capabilities }
+                }
+                if (changed || audioChanged) configureAudio(context)
                 viewerStateChanged()
             }
             httpsPort = WebListenSettings.httpsPort(context)
@@ -491,7 +480,7 @@ internal object WebSession {
                 }
         } catch (e: Exception) {
             next.stop()
-            error = context.getString(UiR.string.error_listener_start, port, e.userMessage(context))
+            error = context.getString(UiR.string.error_listener_start, port.toString(), e.userMessage(context))
         }
     }
 
@@ -514,9 +503,9 @@ internal object WebSession {
                 next.stopPreservingPairing()
                 return context.getString(
                     UiR.string.error_listener_start_kept_previous,
-                    port,
+                    port.toString(),
                     e.userMessage(context),
-                    httpPort,
+                    httpPort.toString(),
                 )
             }
             try {
@@ -831,6 +820,14 @@ internal object WebSession {
         notifyViewport()
     }
 
+    /** Independent subscribers do not replace the built-in CarPlay viewport listener. */
+    fun subscribeBrowserViewport(listener: (Int?, Int?) -> Unit): AutoCloseable {
+        browserViewportObservers.add(listener)
+        val size = effectiveViewport()
+        listener(size.first, size.second)
+        return AutoCloseable { browserViewportObservers.remove(listener) }
+    }
+
     fun setBrowserViewportListener(listener: ((Int?, Int?) -> Unit)?) {
         browserViewportListener = listener
         val size = effectiveViewport()
@@ -852,6 +849,7 @@ internal object WebSession {
     private fun notifyViewport() {
         val size = effectiveViewport()
         browserViewportListener?.invoke(size.first, size.second)
+        browserViewportObservers.forEach { it(size.first, size.second) }
     }
 
     /**
@@ -911,7 +909,10 @@ internal object WebSession {
             "viewport accepted t=${SystemClock.elapsedRealtime()} ${width}x$height ratio=$ratio adaptive=$adaptiveBrowserSize",
         )
         // A browser resize never steals the canvas while the picture is shown on the phone.
-        if (adaptiveBrowserSize && !localDisplayActive) browserViewportListener?.invoke(width, height)
+        if (adaptiveBrowserSize && !localDisplayActive) {
+            browserViewportListener?.invoke(width, height)
+            browserViewportObservers.forEach { it(width, height) }
+        }
         return true
     }
 

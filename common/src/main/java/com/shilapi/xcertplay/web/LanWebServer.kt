@@ -189,6 +189,7 @@ internal class LanWebServer(
                 "/",
                 "/index.html" -> "index.html" to "text/html; charset=utf-8"
                 "/text.js" -> "text.js" to "text/javascript; charset=utf-8"
+                "/source-control.js" -> "source-control.js" to "text/javascript; charset=utf-8"
                 "/app.js" -> "app.js" to "text/javascript; charset=utf-8"
                 "/url-flags.js" -> "url-flags.js" to "text/javascript; charset=utf-8"
                 "/pairing-keypad.js" -> "pairing-keypad.js" to "text/javascript; charset=utf-8"
@@ -491,6 +492,7 @@ internal class LanWebServer(
                 versionedVideo = versionedMedia,
                 imageProtocol = imageProtocol,
             )
+        private var lastSourceRequestId = 0L
         private val rtcLock = Any()
         private var rtcSource: WebVideoSource? = null
         private var rtcConfig: WebVideoSource.Config? = null
@@ -919,6 +921,17 @@ internal class LanWebServer(
                         require(sequence in 0..0xffff_ffffL)
                         sender.acknowledgeAudio(sequence)
                     }
+                    "source-action" -> {
+                        val requestId = data.getString("requestId").also { require(it.length in 1..16) }
+                        val sequence = requestId.toLong().also { require(it > 0) }
+                        if (sequence <= lastSourceRequestId) return
+                        lastSourceRequestId = sequence
+                        WebSession.requestSourceAction(data.getString("action"), data.getString("sourceId"), data.getLong("revision")) { result ->
+                            if (viewer === this && !ended.get() && !closing.get()) reply(WebStreamSender.Control.PHONE_CONNECT,
+                                JSONObject().put("type", "source-action-result").put("requestId", requestId)
+                                    .put("result", result).toString())
+                        }
+                    }
                     "phone-connect" ->
                         WebSession.requestPhoneConnection(context) { result ->
                             if (viewer === this && !ended.get() && !closing.get()) {
@@ -1023,6 +1036,7 @@ internal class LanWebServer(
                                     .put("keyboardInput", media.keyboardInput)
                                     .put("backButton", media.backButton)
                                     .put("sessionPhase", media.sessionPhase)
+                                    .put("sourceControl", WebSession.sourceControl.snapshot())
                                     .put("sourceError", media.errorCategory ?: org.json.JSONObject.NULL)
                                     .put(
                                         "stage",
