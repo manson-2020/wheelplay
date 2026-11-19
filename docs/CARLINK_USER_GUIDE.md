@@ -14,8 +14,8 @@ Wi-Fi Direct、手动热点、USB，以及 Surface / WebRTC 输出均已通过�
 - GitHub Actions 的 **Android Debug Build** 中，`wheelplay-debug-apk` 是宿主，
   `wheelplay-carlink-debug-apk` 是插件。插件 artifact 同时包含 APK 和 `carlink-build.json`。
   CI Debug 用于测试；正式发布使用 Release 签名产物。
-- Debug 插件包名为 `moe.feng.wheelplay.plugin.carlink.debug`；Release 为
-  `moe.feng.wheelplay.plugin.carlink`。两者配置独立，建议只启用一个，避免输入源重复。
+- Debug 插件包名为 `top.wheelpay.plugin.carlink.debug`；Release 为
+  `top.wheelpay.plugin.carlink`。两者配置独立，建议只启用一个，避免输入源重复。
 - 相同包名、相同签名的升级可覆盖安装并保留配置。早期本地 Debug 曾使用 Release 包名，
   如果新 APK 提示签名不一致，先记录设置，再手动卸载旧插件后安装；卸载会清除插件配置。
   不需要为此清除 WheelPlay 数据。CI Debug 在不同构建间可能使用不同调试签名，不能保证覆盖升级。

@@ -10,10 +10,10 @@ plugins {
 }
 
 android {
-    namespace = "moe.feng.wheelplay.plugin.carlink"
+    namespace = "top.wheelpay.plugin.carlink"
     compileSdk = 36
     defaultConfig {
-        applicationId = "moe.feng.wheelplay.plugin.carlink"
+        applicationId = "top.wheelpay.plugin.carlink"
         minSdk = 28
         targetSdk = 36
         versionCode = 1

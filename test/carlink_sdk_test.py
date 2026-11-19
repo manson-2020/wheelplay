@@ -101,8 +101,8 @@ class DependencyTests(unittest.TestCase):
 
 class PackagingPolicyTests(unittest.TestCase):
     def test_variant_identity_matches_mobile_style_debug_suffix(self):
-        for variant, app_id in [('debug', 'moe.feng.wheelplay.plugin.carlink.debug'),
-                                ('release', 'moe.feng.wheelplay.plugin.carlink')]:
+        for variant, app_id in [('debug', 'top.wheelpay.plugin.carlink.debug'),
+                                ('release', 'top.wheelpay.plugin.carlink')]:
             sdk.validate_variant({'variantName': variant, 'applicationId': app_id}, variant)
             with self.assertRaisesRegex(ValueError, 'mismatch'):
                 sdk.validate_variant({'variantName': variant, 'applicationId': app_id},
@@ -111,12 +111,12 @@ class PackagingPolicyTests(unittest.TestCase):
             sdk.validate_variant({'variantName': 'release', 'applicationId': 'other.app'}, 'release')
 
     def test_component_factory_is_absolute_and_packaged_for_both_variants(self):
-        definitions = {'Lmoe/feng/wheelplay/plugin/carlink/CarLinkComponentFactory;'}
-        for application_id in ('moe.feng.wheelplay.plugin.carlink.debug', 'moe.feng.wheelplay.plugin.carlink'):
+        definitions = {'Ltop/wheelpay/plugin/carlink/CarLinkComponentFactory;'}
+        for application_id in ('top.wheelpay.plugin.carlink.debug', 'top.wheelpay.plugin.carlink'):
             manifest = (f'A: package="{application_id}"\n'
                         f'A: http://schemas.android.com/apk/res/android:appComponentFactory(0x0101057a)="{sdk.COMPONENT_FACTORY}"')
             sdk.validate_component_factory(manifest, definitions)
-            for wrong in ('.CarLinkComponentFactory', 'moe.feng.wheelplay.plugin.carlink.debug.CarLinkComponentFactory'):
+            for wrong in ('.CarLinkComponentFactory', 'top.wheelpay.plugin.carlink.debug.CarLinkComponentFactory'):
                 with self.assertRaisesRegex(ValueError, 'fully qualified'):
                     sdk.validate_component_factory(manifest.replace(sdk.COMPONENT_FACTORY, wrong), definitions)
             with self.assertRaisesRegex(ValueError, 'missing from the final APK'):

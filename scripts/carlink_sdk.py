@@ -87,12 +87,12 @@ def prepare(apk, sdk, lock):
 
 
 def validate_variant(metadata, variant):
-    expected_id = 'moe.feng.wheelplay.plugin.carlink' + ('.debug' if variant == 'debug' else '')
+    expected_id = 'top.wheelpay.plugin.carlink' + ('.debug' if variant == 'debug' else '')
     if variant not in ('debug', 'release') or metadata.get('variantName') != variant or metadata.get('applicationId') != expected_id:
         raise ValueError('CarLink APK variant/application ID mismatch')
 
 
-COMPONENT_FACTORY = 'moe.feng.wheelplay.plugin.carlink.CarLinkComponentFactory'
+COMPONENT_FACTORY = 'top.wheelpay.plugin.carlink.CarLinkComponentFactory'
 
 
 def validate_component_factory(manifest, definitions):
