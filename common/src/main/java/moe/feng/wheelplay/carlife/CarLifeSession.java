@@ -9,10 +9,12 @@ import java.util.concurrent.atomic.*;
 /** One attempt over TCP or USB; version fallback belongs to CarLifeRecovery. */
 public final class CarLifeSession {
     public static final int MAX_VIDEO_BYTES = Wire.MAX_VIDEO;
+    private static final int GO_TO_DESKTOP = 0x10021;
     public interface Listener {
         default void configured(int width, int height) {}
         default void failed(String message) {}
         default void media(CarLifeMedia.Snapshot state) {}
+        default void goToDesktop() {}
         void log(String message);
         // Session-relative microseconds from complete-frame arrival, not the coarse wire timestamp.
         void video(byte[] annexB, long ptsUs) throws Exception;
@@ -157,6 +159,10 @@ public final class CarLifeSession {
         if (microphone != null && matched && !closing.get() && (xiaomi == null || xiaomi.running()))
             microphone.command(p.type, xiaomi == null ? p.body : xiaomi.decrypt(p.body));
         if (seen.add(p.type) || (xiaomi != null && !xiaomi.running())) listener.log("RX_COMMAND id=" + p.type + " size=" + p.body.length);
+        if (p.type == GO_TO_DESKTOP) {
+            if (streaming && !closing.get()) listener.goToDesktop();
+            return;
+        }
         if (xiaomi != null) {
             java.util.List<XiaomiHandshake.Action> actions;
             try { actions = xiaomi.accept(p.type, p.body, requestedSize); }
@@ -358,7 +364,6 @@ public final class CarLifeSession {
     }
     public CompletableFuture<Void> stop() {
         if (!closing.compareAndSet(false, true)) return closed;
-        if (microphone != null) microphone.close();
         CountDownLatch released = new CountDownLatch(1);
         try {
             control.execute(() -> {
@@ -370,6 +375,11 @@ public final class CarLifeSession {
         } catch (RejectedExecutionException ignored) { released.countDown(); }
         new Thread(() -> {
             try {
+                // A capture failure can call stop() from the capture thread itself.
+                // Join it here, and keep cleaning up even if its stop callback fails.
+                Exception microphoneFailure = null;
+                if (microphone != null) try { microphone.close(); }
+                catch (Exception error) { microphoneFailure = error; }
                 // Give the control owner a bounded chance to lift a held pointer.
                 // Closing the transport also unblocks a stalled writer or reader.
                 released.await(250, TimeUnit.MILLISECONDS);
@@ -382,6 +392,11 @@ public final class CarLifeSession {
                 boolean clean = readers.awaitTermination(3, TimeUnit.SECONDS) && controlStopped;
                 if (clean && xiaomi != null) xiaomi.close();
                 listener.log(clean ? "STOPPED_CLEAN" : "STOP_TIMEOUT");
+                if (microphoneFailure != null) {
+                    if (transportFailure != null) microphoneFailure.addSuppressed(transportFailure);
+                    if (!clean) microphoneFailure.addSuppressed(new IOException("workers did not stop"));
+                    throw microphoneFailure;
+                }
                 if (transportFailure != null) throw transportFailure;
                 if (!clean) throw new IOException("workers did not stop");
             } catch (Exception e) {
